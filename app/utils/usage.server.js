@@ -1,45 +1,37 @@
 import prisma from "../db.server";
 import { getVariantLimitForPlan } from "./subscription";
 
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
 /**
- * Get current billing period start date based on billing cycle day
- * Example: If billing day is 15 and today is Feb 20, returns "2026-02-15"
+ * Get current billing period start date based on 30-day intervals
+ * Starting from the startedAt date
  */
-function getCurrentBillingPeriod(billingCycleDay) {
-  const now = new Date();
-  const currentDay = now.getDate();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
+function getCurrentBillingPeriod(startedAt) {
+  const start = new Date(startedAt).getTime();
+  const now = new Date().getTime();
   
-  let periodStart;
+  if (now < start) return new Date(start).toISOString().split('T')[0];
   
-  if (currentDay >= billingCycleDay) {
-    // We're in the current month's billing period
-    periodStart = new Date(currentYear, currentMonth, billingCycleDay);
-  } else {
-    // We're in the previous month's billing period
-    periodStart = new Date(currentYear, currentMonth - 1, billingCycleDay);
-  }
+  const diff = now - start;
+  const cycleCount = Math.floor(diff / THIRTY_DAYS_MS);
+  const periodStart = new Date(start + (cycleCount * THIRTY_DAYS_MS));
   
-  return periodStart.toISOString().split('T')[0]; // "2026-02-15"
+  return periodStart.toISOString().split('T')[0];
 }
 
 /**
- * Get next reset date for billing cycle
+ * Get next reset date for 30-day billing cycle
  */
-function getNextResetDate(billingCycleDay) {
-  const now = new Date();
-  const currentDay = now.getDate();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
+function getNextResetDate(startedAt) {
+  const start = new Date(startedAt).getTime();
+  const now = new Date().getTime();
   
-  if (currentDay >= billingCycleDay) {
-    // Next reset is next month
-    return new Date(currentYear, currentMonth + 1, billingCycleDay);
-  } else {
-    // Next reset is this month
-    return new Date(currentYear, currentMonth, billingCycleDay);
-  }
+  if (now < start) return new Date(start + THIRTY_DAYS_MS);
+  
+  const diff = now - start;
+  const nextCycleCount = Math.floor(diff / THIRTY_DAYS_MS) + 1;
+  return new Date(start + (nextCycleCount * THIRTY_DAYS_MS));
 }
 
 /**
@@ -66,13 +58,18 @@ export async function getOrCreateSubscriptionInfo(shop, subscription) {
         startedAt: startDate
       }
     });
-  } else if (subscription && subInfo.subscriptionId !== subscription.id) {
-    // Update if subscription changed
+  } else if ((subscription && subInfo.subscriptionId !== subscription.id) || (!subscription && subInfo.subscriptionId)) {
+    // Update if subscription changed OR if they no longer have an active subscription
+    
+    // If upgrading/downgrading, reset the startedAt to now to align with Shopify's new 30-day cycle
+    const newStartDate = subscription?.createdAt ? new Date(subscription.createdAt) : new Date();
+
     subInfo = await prisma.subscriptionInfo.update({
       where: { shop },
       data: {
-        subscriptionId: subscription.id,
-        planName: subscription.name
+        subscriptionId: subscription?.id || null,
+        planName: subscription?.name || "Free",
+        startedAt: newStartDate
       }
     });
   }
@@ -92,7 +89,7 @@ export async function getCurrentBillingUsage(shop) {
     throw new Error("Subscription info not found for shop");
   }
   
-  const billingPeriod = getCurrentBillingPeriod(subInfo.billingCycleDay);
+  const billingPeriod = getCurrentBillingPeriod(subInfo.startedAt);
   
   let usage = await prisma.usageTracking.findUnique({
     where: { 
@@ -117,7 +114,7 @@ export async function getCurrentBillingUsage(shop) {
   return { 
     usage, 
     billingPeriod, 
-    nextResetDate: getNextResetDate(subInfo.billingCycleDay) 
+    nextResetDate: getNextResetDate(subInfo.startedAt) 
   };
 }
 
@@ -133,7 +130,7 @@ export async function incrementUsage(shop, priceCount, compareAtCount) {
     throw new Error("Subscription info not found");
   }
   
-  const billingPeriod = getCurrentBillingPeriod(subInfo.billingCycleDay);
+  const billingPeriod = getCurrentBillingPeriod(subInfo.startedAt);
   
   return await prisma.usageTracking.upsert({
     where: { 
