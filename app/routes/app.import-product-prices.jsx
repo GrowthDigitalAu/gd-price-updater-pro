@@ -1,17 +1,42 @@
 import { useState, useEffect, useRef } from "react";
-import { useFetcher } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import ExcelJS from "exceljs";
 import { useAppBridge } from "@shopify/app-bridge-react";
-import { Pagination, ProgressBar } from "@shopify/polaris";
+import { Pagination, ProgressBar, Card, Text, BlockStack, Badge, InlineStack, Banner } from "@shopify/polaris";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+import { getOrCreateSubscriptionInfo, getUsageStats, checkUsageLimit, incrementUsage } from "../utils/usage.server";
 
 export const loader = async ({ request }) => {
-    const { admin } = await authenticate.admin(request);
+    const { admin, session } = await authenticate.admin(request);
+    const shop = session.shop;
     const url = new URL(request.url);
     const checkStatus = url.searchParams.get("checkStatus");
     const operationId = url.searchParams.get("operationId");
 
+    // Fetch subscription info
+    const billingCheck = await admin.graphql(
+        `#graphql
+          query {
+            currentAppInstallation {
+              activeSubscriptions {
+                id
+                name
+                status
+              }
+            }
+          }
+        `
+    );
+    const billingJson = await billingCheck.json();
+    const subscription = billingJson.data?.currentAppInstallation?.activeSubscriptions?.[0] || null;
+
+    // Sync in DB
+    const subInfo = await getOrCreateSubscriptionInfo(shop, subscription);
+    const planName = subInfo.planName;
+
+    // Get usage stats
+    const usageStats = await getUsageStats(shop, planName);
 
     if (checkStatus === "true" && operationId) {
         const response = await admin.graphql(
@@ -33,7 +58,7 @@ export const loader = async ({ request }) => {
         const bulkOperation = data.data?.node;
 
         if (!bulkOperation) {
-            return { success: false, status: "NONE", operationId };
+            return { success: false, status: "NONE", operationId, usageStats, planName };
         }
 
         if (bulkOperation.status === "COMPLETED") {
@@ -55,20 +80,21 @@ export const loader = async ({ request }) => {
                 }
              }
              
-             return { success: true, status: "COMPLETED", bulkResults: { errors: bulkErrors }, operationId };
+             return { success: true, status: "COMPLETED", bulkResults: { errors: bulkErrors }, operationId, usageStats, planName };
 
         } else if (bulkOperation.status === "RUNNING" || bulkOperation.status === "CREATED") {
-             return { success: true, status: "RUNNING", progress: bulkOperation.objectCount, operationId };
+             return { success: true, status: "RUNNING", progress: bulkOperation.objectCount, operationId, usageStats, planName };
         } else {
-             return { success: false, status: bulkOperation.status, operationId };
+             return { success: false, status: bulkOperation.status, operationId, usageStats, planName };
         }
     }
 
-    return { success: true };
+    return { success: true, usageStats, planName };
 };
 
 export const action = async ({ request }) => {
-    const { admin } = await authenticate.admin(request);
+    const { admin, session } = await authenticate.admin(request);
+    const shop = session.shop;
     const formData = await request.formData();
     const dataString = formData.get("data");
     const headersString = formData.get("headers");
@@ -114,6 +140,21 @@ export const action = async ({ request }) => {
     
     let hasNextPage = true;
     let endCursor = null;
+
+    // Fetch subscription for limit check
+    const billingCheck = await admin.graphql(
+        `#graphql
+          query {
+            currentAppInstallation {
+              activeSubscriptions {
+                name
+              }
+            }
+          }
+        `
+    );
+    const billingJson = await billingCheck.json();
+    const planName = billingJson.data?.currentAppInstallation?.activeSubscriptions?.[0]?.name || "Free";
 
     while (hasNextPage) {
         const query = `#graphql
@@ -251,6 +292,29 @@ export const action = async ({ request }) => {
         }
     }
 
+    // --- USAGE LIMIT CHECK ---
+    let priceUpdatesCount = 0;
+    let compareAtUpdatesCount = 0;
+
+    bulkUpdates.forEach(update => {
+        if (update.variantInput.price) priceUpdatesCount++;
+        if (update.variantInput.compareAtPrice !== undefined) compareAtUpdatesCount++;
+    });
+
+    const usageCheck = await checkUsageLimit(shop, planName, priceUpdatesCount, compareAtUpdatesCount);
+
+    if (!usageCheck.allowed) {
+        return { 
+            success: false, 
+            usageExceeded: true, 
+            error: `Limit exceeded. You are attempting ${usageCheck.type === 'price' ? priceUpdatesCount : compareAtUpdatesCount} updates, but only ${usageCheck.limit - usageCheck.current} are remaining in your current billing period.`,
+            type: usageCheck.type,
+            limit: usageCheck.limit,
+            current: usageCheck.current,
+            attempted: usageCheck.attempted
+        };
+    }
+
 
 
     if (bulkUpdates.length === 0) {
@@ -340,6 +404,9 @@ export const action = async ({ request }) => {
                  results.bulkOperationId = opId;
                  // Store how many variants we queued for update
                  results.expectedUpdateCount = bulkUpdates.length;
+
+                 // Increment usage in DB
+                 await incrementUsage(shop, priceUpdatesCount, compareAtUpdatesCount);
              } else {
                  results.errors.push("Failed to trigger backend bulk operation (No ID returned)");
              }
@@ -353,6 +420,7 @@ export const action = async ({ request }) => {
 
 export default function ImportProductPrices() {
     const shopify = useAppBridge();
+    const { usageStats, planName } = useLoaderData();
     const fetcher = useFetcher();
     const pollFetcher = useFetcher(); 
     
@@ -500,8 +568,61 @@ export default function ImportProductPrices() {
 
     const displayResults = finalResults || validatedResults;
 
+    const renderUsageInfo = () => {
+        if (!usageStats) return null;
+
+        const { priceUpdates, compareAtUpdates, limits, priceRemaining, compareAtRemaining } = usageStats;
+        
+        return (
+            <s-box paddingBlockStart="large">
+                <Card>
+                    <BlockStack gap="300">
+                        <InlineStack align="space-between">
+                            <Text variant="headingMd" as="h2">Plan Usage: <Badge tone="info">{planName}</Badge></Text>
+                            <Text variant="bodySm" tone="subdued">Limits Reset On: {new Date(usageStats.nextResetDate).toLocaleDateString()}</Text>
+                        </InlineStack>
+                        
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            <BlockStack gap="100">
+                                <Text variant="bodyMd" fontWeight="bold">Price Updates</Text>
+                                <Text variant="bodySm">
+                                    {priceUpdates} / {limits.price === null ? 'Unlimited' : limits.price} used
+                                </Text>
+                                <Text variant="bodySm" tone={priceRemaining > 0 || limits.price === null ? 'success' : 'critical'}>
+                                    {limits.price === null ? 'Unlimited remaining' : `${priceRemaining} left`}
+                                </Text>
+                            </BlockStack>
+
+                            <BlockStack gap="100">
+                                <Text variant="bodyMd" fontWeight="bold">Compare-At Price Updates</Text>
+                                <Text variant="bodySm">
+                                    {compareAtUpdates} / {limits.compareAt === null ? 'Unlimited' : limits.compareAt} used
+                                </Text>
+                                <Text variant="bodySm" tone={compareAtRemaining > 0 || limits.compareAt === null ? 'success' : 'critical'}>
+                                    {limits.compareAt === null ? 'Unlimited remaining' : `${compareAtRemaining} left`}
+                                </Text>
+                            </BlockStack>
+                        </div>
+                    </BlockStack>
+                </Card>
+            </s-box>
+        );
+    };
+
     return (
         <s-page heading="Import Product Prices">
+            {renderUsageInfo()}
+
+            {fetcher.data?.usageExceeded && (
+                <s-box paddingBlockStart="large">
+                    <Banner tone="critical" title="Usage Limit Exceeded">
+                        <p>{fetcher.data.error}</p>
+                        <p>Please upgrade your plan to increase your limits.</p>
+                        <s-button url="/app/subscription" variant="primary">Upgrade Plan</s-button>
+                    </Banner>
+                </s-box>
+            )}
+
             <s-box paddingBlockStart="large">
                 <s-section heading="Upload an Excel file with SKU, Price, and CompareAt Price columns.">
                     <input
