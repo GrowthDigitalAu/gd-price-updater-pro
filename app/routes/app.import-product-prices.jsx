@@ -108,6 +108,9 @@ export const action = async ({ request }) => {
         errors: [],
         failedRows: [],
         skippedRows: [],
+        updatedRows: [],
+        priceUpdatesCount: 0,
+        compareAtUpdatesCount: 0,
         bulkOperationId: null
     };
 
@@ -320,6 +323,18 @@ export const action = async ({ request }) => {
             if (rowPriceNeedsUpdate) remainingPrice--;
             if (rowCompareAtNeedsUpdate) remainingCompareAt--;
 
+            // Determine Reason
+            let updateReason = "";
+            if (rowPriceNeedsUpdate && rowCompareAtNeedsUpdate) {
+                updateReason = "Price and CompareAt price both updated";
+            } else if (rowPriceNeedsUpdate) {
+                updateReason = "Price updated";
+            } else if (rowCompareAtNeedsUpdate) {
+                updateReason = "CompareAt price updated";
+            }
+
+            results.updatedRows.push(normalizeRow(row, { "Reason": updateReason }));
+
             bulkUpdates.push({
                 productId: variantData.productId,
                 variantInput: variantInput
@@ -339,7 +354,8 @@ export const action = async ({ request }) => {
         if (update.variantInput.compareAtPrice !== undefined) finalCompareAtUpdatesCount++;
     });
 
-
+    results.priceUpdatesCount = finalPriceUpdatesCount;
+    results.compareAtUpdatesCount = finalCompareAtUpdatesCount;
 
     if (bulkUpdates.length === 0) {
         return { success: true, results };
@@ -446,6 +462,14 @@ export default function ImportProductPrices() {
     const fetcher = useFetcher();
     const pollFetcher = useFetcher(); 
     const navigate = useNavigate();
+    const [isStylesLoaded, setIsStylesLoaded] = useState(false);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setIsStylesLoaded(true);
+        }, 100);
+        return () => clearTimeout(timer);
+    }, []);
     
     const [file, setFile] = useState(null);
     const [parsedData, setParsedData] = useState(null);
@@ -460,6 +484,8 @@ export default function ImportProductPrices() {
     const failedRowsPerPage = 10;
     const [skippedPage, setSkippedPage] = useState(1);
     const skippedRowsPerPage = 10;
+    const [updatedPage, setUpdatedPage] = useState(1);
+    const updatedRowsPerPage = 10;
 
     const isLoading = fetcher.state === "submitting" || fetcher.state === "loading";
 
@@ -469,6 +495,7 @@ export default function ImportProductPrices() {
             setFile(selectedFile);
             setFailedPage(1);
             setSkippedPage(1);
+            setUpdatedPage(1);
             setValidatedResults(null); 
             setFinalResults(null);
 
@@ -638,7 +665,7 @@ export default function ImportProductPrices() {
 
     return (
         <s-page heading="Import Product Prices">
-            {showUpgradeBanner && (
+            {isStylesLoaded && showUpgradeBanner && (
                 <s-box paddingBlockStart="large">
                     <Banner
                         tone="critical"
@@ -702,16 +729,53 @@ export default function ImportProductPrices() {
                         <s-section heading="Import Results">
                             <s-stack gap="200" direction="block">
                                 <s-text as="p">Total rows: {displayResults.total}</s-text>
-                                <s-text as="p">Successfully updated: {displayResults.updated}</s-text>
-                                <s-text as="p">Skipped: {displayResults.skippedRows?.length || 0}</s-text>
+                                <s-text as="p">Successfully Updated Price: {displayResults.priceUpdatesCount || 0}</s-text>
+                                <s-text as="p">Successfully Updated CompareAt Price: {displayResults.compareAtUpdatesCount || 0}</s-text>
                                 <s-text as="p">Errors: {displayResults.errors.length}</s-text>
                             </s-stack>
                         </s-section>
                     </s-box>
 
+                    {displayResults.updatedRows?.length > 0 && (
+                        <s-box paddingBlockStart="large">
+                            <s-section heading="✅ Updated Rows">
+                                <s-table>
+                                    <s-table-header-row>
+                                        {Object.keys(displayResults.updatedRows[0] || {}).map((key) => (
+                                            <s-table-header key={key}>{key}</s-table-header>
+                                        ))}
+                                    </s-table-header-row>
+                                    <s-table-body>
+                                        {displayResults.updatedRows
+                                            .slice((updatedPage - 1) * updatedRowsPerPage, updatedPage * updatedRowsPerPage)
+                                            .map((row, index) => (
+                                                <s-table-row key={index}>
+                                                    {Object.keys(displayResults.updatedRows[0] || {}).map((key, cellIndex) => (
+                                                        <s-table-cell key={cellIndex}>
+                                                            {row[key]?.toString() || '-'}
+                                                        </s-table-cell>
+                                                    ))}
+                                                </s-table-row>
+                                            ))}
+                                    </s-table-body>
+                                </s-table>
+                                {displayResults.updatedRows.length > updatedRowsPerPage && (
+                                    <Pagination
+                                        hasPrevious={updatedPage > 1}
+                                        onPrevious={() => setUpdatedPage(updatedPage - 1)}
+                                        hasNext={updatedPage < Math.ceil(displayResults.updatedRows.length / updatedRowsPerPage)}
+                                        onNext={() => setUpdatedPage(updatedPage + 1)}
+                                        type="table"
+                                        label={`${((updatedPage - 1) * updatedRowsPerPage) + 1}-${Math.min(updatedPage * updatedRowsPerPage, displayResults.updatedRows.length)} of ${displayResults.updatedRows.length}`}
+                                    />
+                                )}
+                            </s-section>
+                        </s-box>
+                    )}
+
                     {displayResults.failedRows?.length > 0 && (
                         <s-box paddingBlockStart="large">
-                            <s-section heading={`❌ Failed Rows (${displayResults.failedRows.length})`}>
+                            <s-section heading="❌ Failed Rows">
                                 <s-table>
                                     <s-table-header-row>
                                         {Object.keys(displayResults.failedRows[0] || {}).map((key) => (
@@ -748,7 +812,7 @@ export default function ImportProductPrices() {
 
                     {displayResults.skippedRows?.length > 0 && (
                         <s-box paddingBlockStart="large" paddingBlockEnd="large">
-                            <s-section heading={`⏭️ Skipped Rows (${displayResults.skippedRows.length}) - Prices Already Match`}>
+                            <s-section heading="⏭️ Skipped Rows - Prices Already Match">
                                 <s-table>
                                     <s-table-header-row>
                                         {Object.keys(displayResults.skippedRows[0] || {}).map((key) => (
