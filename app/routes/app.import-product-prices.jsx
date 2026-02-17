@@ -587,21 +587,25 @@ export default function ImportProductPrices() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                             <BlockStack gap="100">
                                 <Text variant="bodyMd" fontWeight="bold">Price Updates</Text>
-                                <Text variant="bodySm">
-                                    {priceUpdates} / {limits.price === null ? 'Unlimited' : limits.price} used
-                                </Text>
+                                {limits.price !== null && (
+                                    <Text variant="bodySm">
+                                        {priceUpdates} / {limits.price} used
+                                    </Text>
+                                )}
                                 <Text variant="bodySm" tone={priceRemaining > 0 || limits.price === null ? 'success' : 'critical'}>
-                                    {limits.price === null ? 'Unlimited remaining' : `${priceRemaining} left`}
+                                    {limits.price === null ? 'No Limit' : `${priceRemaining} left`}
                                 </Text>
                             </BlockStack>
 
                             <BlockStack gap="100">
                                 <Text variant="bodyMd" fontWeight="bold">Compare-At Price Updates</Text>
-                                <Text variant="bodySm">
-                                    {compareAtUpdates} / {limits.compareAt === null ? 'Unlimited' : limits.compareAt} used
-                                </Text>
+                                {limits.compareAt !== null && (
+                                    <Text variant="bodySm">
+                                        {compareAtUpdates} / {limits.compareAt} used
+                                    </Text>
+                                )}
                                 <Text variant="bodySm" tone={compareAtRemaining > 0 || limits.compareAt === null ? 'success' : 'critical'}>
-                                    {limits.compareAt === null ? 'Unlimited remaining' : `${compareAtRemaining} left`}
+                                    {limits.compareAt === null ? 'No Limit' : `${compareAtRemaining} left`}
                                 </Text>
                             </BlockStack>
                         </div>
