@@ -314,7 +314,7 @@ export default function ExportProductData() {
 
 
     return (
-        <s-page heading="Export Product Inventory Data">
+        <s-page heading="Export Product Prices">
             <s-box paddingBlockStart="large" paddingBlockEnd="large">
                 <s-section heading='Click below to export all product price data.'>
                     <s-button
