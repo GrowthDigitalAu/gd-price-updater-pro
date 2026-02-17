@@ -73,6 +73,7 @@ export default function App() {
           <s-link href="/app/import-product-prices">Import Product Prices</s-link>
           <s-link href="/app/export-product-prices">Export Product Prices</s-link>
           <s-link href="/app/subscription">Subscription</s-link>
+          <s-link href="/app/how-to-use">How to Use</s-link>
         </s-app-nav>
         {showContent ? <Outlet /> : null}
       </PolarisAppProvider>
