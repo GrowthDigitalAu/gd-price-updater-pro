@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from "react";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useNavigate } from "react-router";
 import { authenticate } from "../shopify.server";
 import ExcelJS from "exceljs";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { Pagination, ProgressBar, Card, Text, BlockStack, Badge, InlineStack, Banner } from "@shopify/polaris";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { getOrCreateSubscriptionInfo, getUsageStats, checkUsageLimit, incrementUsage } from "../utils/usage.server";
+import { getOrCreateSubscriptionInfo, getUsageStats, incrementUsage } from "../utils/usage.server";
 
 export const loader = async ({ request }) => {
     const { admin, session } = await authenticate.admin(request);
@@ -142,7 +142,6 @@ export const action = async ({ request }) => {
     let hasNextPage = true;
     let endCursor = null;
 
-    // Fetch subscription for limit check
     const billingCheck = await admin.graphql(
         `#graphql
           query {
@@ -197,6 +196,10 @@ export const action = async ({ request }) => {
     }
 
 
+    const usageStats = await getUsageStats(shop, planName);
+    let remainingPrice = usageStats.limits.price !== null ? usageStats.limits.price - usageStats.priceUpdates : Infinity;
+    let remainingCompareAt = usageStats.limits.compareAt !== null ? usageStats.limits.compareAt - usageStats.compareAtUpdates : Infinity;
+
     const processedCombinations = new Set();
     const bulkUpdates = [];
 
@@ -248,7 +251,6 @@ export const action = async ({ request }) => {
             }
             processedCombinations.add(skuKey);
 
-            // Lookup variant
             const variantData = skuMap.get(skuKey);
             
             if (!variantData) {
@@ -283,6 +285,41 @@ export const action = async ({ request }) => {
                 continue;
             }
 
+            let rowPriceNeedsUpdate = variantInput.price ? true : false;
+            let rowCompareAtNeedsUpdate = variantInput.compareAtPrice !== undefined ? true : false;
+
+            const priceLimitHit = rowPriceNeedsUpdate && remainingPrice <= 0;
+            const compareAtLimitHit = rowCompareAtNeedsUpdate && remainingCompareAt <= 0;
+
+            if (priceLimitHit && compareAtLimitHit) {
+                results.errors.push(`Limit exceeded for SKU ${sku}: Both Price and Compare-At Price update limits reached`);
+                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Both price and compare at price is not updated, plan limit reached' }));
+                continue;
+            }
+
+            if (priceLimitHit) {
+                // Skip Price update but allow CompareAt if needed (and not limited, which is covered above)
+                delete variantInput.price;
+                rowPriceNeedsUpdate = false;
+                results.errors.push(`Limit exceeded for SKU ${sku}: Price update limit reached`);
+                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Price not updated, plan limit reached' }));
+            }
+
+            if (compareAtLimitHit) {
+                 // Skip CompareAt update
+                delete variantInput.compareAtPrice;
+                rowCompareAtNeedsUpdate = false;
+                results.errors.push(`Limit exceeded for SKU ${sku}: Compare-At Price update limit reached`);
+                results.failedRows.push(normalizeRow(row, { "Error Reason": 'CompareAt Price not updated, plan limit reached' }));
+            }
+
+            if (!rowPriceNeedsUpdate && !rowCompareAtNeedsUpdate) {
+                continue;
+            }
+
+            if (rowPriceNeedsUpdate) remainingPrice--;
+            if (rowCompareAtNeedsUpdate) remainingCompareAt--;
+
             bulkUpdates.push({
                 productId: variantData.productId,
                 variantInput: variantInput
@@ -294,28 +331,13 @@ export const action = async ({ request }) => {
         }
     }
 
-    // --- USAGE LIMIT CHECK ---
-    let priceUpdatesCount = 0;
-    let compareAtUpdatesCount = 0;
+    let finalPriceUpdatesCount = 0;
+    let finalCompareAtUpdatesCount = 0;
 
     bulkUpdates.forEach(update => {
-        if (update.variantInput.price) priceUpdatesCount++;
-        if (update.variantInput.compareAtPrice !== undefined) compareAtUpdatesCount++;
+        if (update.variantInput.price) finalPriceUpdatesCount++;
+        if (update.variantInput.compareAtPrice !== undefined) finalCompareAtUpdatesCount++;
     });
-
-    const usageCheck = await checkUsageLimit(shop, planName, priceUpdatesCount, compareAtUpdatesCount);
-
-    if (!usageCheck.allowed) {
-        return { 
-            success: false, 
-            usageExceeded: true, 
-            error: `Limit exceeded. You are attempting ${usageCheck.type === 'price' ? priceUpdatesCount : compareAtUpdatesCount} updates, but only ${usageCheck.limit - usageCheck.current} are remaining in your current billing period.`,
-            type: usageCheck.type,
-            limit: usageCheck.limit,
-            current: usageCheck.current,
-            attempted: usageCheck.attempted
-        };
-    }
 
 
 
@@ -404,11 +426,9 @@ export const action = async ({ request }) => {
              
              if (opId) {
                  results.bulkOperationId = opId;
-                 // Store how many variants we queued for update
                  results.expectedUpdateCount = bulkUpdates.length;
 
-                 // Increment usage in DB
-                 await incrementUsage(shop, priceUpdatesCount, compareAtUpdatesCount);
+                 await incrementUsage(shop, finalPriceUpdatesCount, finalCompareAtUpdatesCount);
              } else {
                  results.errors.push("Failed to trigger backend bulk operation (No ID returned)");
              }
@@ -425,6 +445,7 @@ export default function ImportProductPrices() {
     const { usageStats, planName } = useLoaderData();
     const fetcher = useFetcher();
     const pollFetcher = useFetcher(); 
+    const navigate = useNavigate();
     
     const [file, setFile] = useState(null);
     const [parsedData, setParsedData] = useState(null);
@@ -479,8 +500,7 @@ export default function ImportProductPrices() {
                 shopify.toast.show(`File loaded: ${jsonData.length} rows. Starting import...`, { duration: 5000 });
                 setIsProgressVisible(true);
                 setProgress(10);
-                // Send headers to preserve column order
-                const headersInOrder = headers.filter(h => h); // Remove empty entries
+                const headersInOrder = headers.filter(h => h);
                 fetcher.submit({ 
                     data: JSON.stringify(jsonData),
                     headers: JSON.stringify(headersInOrder)
@@ -494,7 +514,6 @@ export default function ImportProductPrices() {
         if (fileInputRef.current) fileInputRef.current.click();
     };
 
-    // --- HANDLE ACTION RESPONSE ---
     useEffect(() => {
         if (fetcher.data?.success && fetcher.state === "idle") {
             const res = fetcher.data.results;
@@ -511,7 +530,6 @@ export default function ImportProductPrices() {
         }
     }, [fetcher.data, fetcher.state]);
 
-    // --- POLLING ---
     useEffect(() => {
         if (validatedResults?.bulkOperationId) {
              const opId = validatedResults.bulkOperationId;
@@ -528,7 +546,6 @@ export default function ImportProductPrices() {
                        
                        const merged = {
                            ...validatedResults,
-                           // Use the expected count we stored during validation
                            updated: validatedResults.expectedUpdateCount || 0,
                            errors: [...validatedResults.errors, ...bulkRes.errors]
                        };
@@ -544,7 +561,6 @@ export default function ImportProductPrices() {
         }
     }, [pollFetcher.data, validatedResults]);
 
-    // --- PROGRESS UI ---
     useEffect(() => {
         if (isLoading) {
              const interval = setInterval(() => {
@@ -615,19 +631,40 @@ export default function ImportProductPrices() {
         );
     };
 
+    const showUpgradeBanner = usageStats && (
+        (usageStats.limits.price !== null && usageStats.priceRemaining <= 0) ||
+        (usageStats.limits.compareAt !== null && usageStats.compareAtRemaining <= 0)
+    );
+
     return (
         <s-page heading="Import Product Prices">
-            {renderUsageInfo()}
-
-            {fetcher.data?.usageExceeded && (
+            {showUpgradeBanner && (
                 <s-box paddingBlockStart="large">
-                    <Banner tone="critical" title="Usage Limit Exceeded">
-                        <p>{fetcher.data.error}</p>
-                        <p>Please upgrade your plan to increase your limits.</p>
-                        <s-button url="/app/subscription" variant="primary">Upgrade Plan</s-button>
+                    <Banner
+                        tone="critical"
+                    >
+                        <InlineStack align="space-between" blockAlign="center">
+                            <InlineStack gap="200" blockAlign="center">
+                                <Text as="span" fontWeight="semibold">
+                                    Plan: {planName}
+                                </Text>
+                                <Text as="span" variant="bodyMd" tone="critical">
+                                    You have reached your plan limit.
+                                </Text>
+                            </InlineStack>
+                            <s-button 
+                                onClick={() => navigate('/app/subscription')} 
+                                variant="primary" 
+                                size="slim"
+                            >
+                                Upgrade Plan
+                            </s-button>
+                        </InlineStack>
                     </Banner>
                 </s-box>
             )}
+            {renderUsageInfo()}
+
 
             <s-box paddingBlockStart="large">
                 <s-section heading="Upload an Excel file with SKU, Price, and CompareAt Price columns.">
