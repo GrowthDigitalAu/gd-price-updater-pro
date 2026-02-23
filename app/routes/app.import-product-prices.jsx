@@ -263,6 +263,7 @@ export const action = async ({ request }) => {
             }
 
             // Determine Reason
+            let updateReason = "";
             if (variantInput.price && variantInput.compareAtPrice !== undefined) {
                 updateReason = "Price and CompareAt price both updated";
             } else if (variantInput.price) {
