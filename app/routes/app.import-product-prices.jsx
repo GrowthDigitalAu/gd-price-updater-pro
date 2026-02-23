@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { useFetcher, useLoaderData, useNavigate } from "react-router";
+import { useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import ExcelJS from "exceljs";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { Pagination, ProgressBar } from "@shopify/polaris";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 export const loader = async ({ request }) => {
-    const { admin, session } = await authenticate.admin(request);
-    const shop = session.shop;
+    const { admin } = await authenticate.admin(request);
     const url = new URL(request.url);
     const checkStatus = url.searchParams.get("checkStatus");
     const operationId = url.searchParams.get("operationId");
@@ -88,8 +87,7 @@ export const loader = async ({ request }) => {
 };
 
 export const action = async ({ request }) => {
-    const { admin, session } = await authenticate.admin(request);
-    const shop = session.shop;
+    const { admin } = await authenticate.admin(request);
     const formData = await request.formData();
     const dataString = formData.get("data");
     const headersString = formData.get("headers");
@@ -138,21 +136,6 @@ export const action = async ({ request }) => {
     
     let hasNextPage = true;
     let endCursor = null;
-
-    const billingCheck = await admin.graphql(
-        `#graphql
-          query {
-            currentAppInstallation {
-              activeSubscriptions {
-                name
-                createdAt
-              }
-            }
-          }
-        `
-    );
-    const billingJson = await billingCheck.json();
-    const planName = billingJson.data?.currentAppInstallation?.activeSubscriptions?.[0]?.name || "None";
 
     while (hasNextPage) {
         const query = `#graphql
@@ -411,10 +394,9 @@ export const action = async ({ request }) => {
 
 export default function ImportProductPrices() {
     const shopify = useAppBridge();
-    const { planName } = useLoaderData();
     const fetcher = useFetcher();
     const pollFetcher = useFetcher(); 
-    const navigate = useNavigate();
+
     const [isStylesLoaded, setIsStylesLoaded] = useState(false);
 
     useEffect(() => {
