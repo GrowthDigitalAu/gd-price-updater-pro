@@ -34,24 +34,3 @@ model Session {
   refreshTokenExpires DateTime?
 }
 
-model SubscriptionInfo {
-  id              String   @id @default(cuid())
-  shop            String   @unique
-  subscriptionId  String?
-  planName        String?
-  startedAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-}
-
-model UsageTracking {
-  id                String   @id @default(cuid())
-  shop              String
-  billingPeriod     String
-  priceUpdates      Int      @default(0)
-  compareAtUpdates  Int      @default(0)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
-  @@unique([shop, billingPeriod])
-  @@index([shop])
-}

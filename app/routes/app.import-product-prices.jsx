@@ -3,10 +3,8 @@ import { useFetcher, useLoaderData, useNavigate } from "react-router";
 import { authenticate } from "../shopify.server";
 import ExcelJS from "exceljs";
 import { useAppBridge } from "@shopify/app-bridge-react";
-import { Pagination, ProgressBar, Card, Text, BlockStack, Badge, InlineStack, Banner } from "@shopify/polaris";
+import { Pagination, ProgressBar } from "@shopify/polaris";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { getOrCreateSubscriptionInfo, getUsageStats, incrementUsage } from "../utils/usage.server";
-
 export const loader = async ({ request }) => {
     const { admin, session } = await authenticate.admin(request);
     const shop = session.shop;
@@ -32,12 +30,8 @@ export const loader = async ({ request }) => {
     const billingJson = await billingCheck.json();
     const subscription = billingJson.data?.currentAppInstallation?.activeSubscriptions?.[0] || null;
 
-    // Sync in DB
-    const subInfo = await getOrCreateSubscriptionInfo(shop, subscription);
-    const planName = subInfo.planName;
-
-    // Get usage stats
-    const usageStats = await getUsageStats(shop, planName);
+    // Identify active plan based on Shopify GQL
+    const planName = subscription?.name || "None";
 
     if (checkStatus === "true" && operationId) {
         const response = await admin.graphql(
@@ -59,7 +53,7 @@ export const loader = async ({ request }) => {
         const bulkOperation = data.data?.node;
 
         if (!bulkOperation) {
-            return { success: false, status: "NONE", operationId, usageStats, planName };
+            return { success: false, status: "NONE", operationId, planName };
         }
 
         if (bulkOperation.status === "COMPLETED") {
@@ -81,16 +75,16 @@ export const loader = async ({ request }) => {
                 }
              }
              
-             return { success: true, status: "COMPLETED", bulkResults: { errors: bulkErrors }, operationId, usageStats, planName };
+             return { success: true, status: "COMPLETED", bulkResults: { errors: bulkErrors }, operationId, planName };
 
         } else if (bulkOperation.status === "RUNNING" || bulkOperation.status === "CREATED") {
-             return { success: true, status: "RUNNING", progress: bulkOperation.objectCount, operationId, usageStats, planName };
+             return { success: true, status: "RUNNING", progress: bulkOperation.objectCount, operationId, planName };
         } else {
-             return { success: false, status: bulkOperation.status, operationId, usageStats, planName };
+             return { success: false, status: bulkOperation.status, operationId, planName };
         }
     }
 
-    return { success: true, usageStats, planName };
+    return { success: true, planName };
 };
 
 export const action = async ({ request }) => {
@@ -158,7 +152,7 @@ export const action = async ({ request }) => {
         `
     );
     const billingJson = await billingCheck.json();
-    const planName = billingJson.data?.currentAppInstallation?.activeSubscriptions?.[0]?.name || "Free";
+    const planName = billingJson.data?.currentAppInstallation?.activeSubscriptions?.[0]?.name || "None";
 
     while (hasNextPage) {
         const query = `#graphql
@@ -199,9 +193,6 @@ export const action = async ({ request }) => {
     }
 
 
-    const usageStats = await getUsageStats(shop, planName);
-    let remainingPrice = usageStats.limits.price !== null ? usageStats.limits.price - usageStats.priceUpdates : Infinity;
-    let remainingCompareAt = usageStats.limits.compareAt !== null ? usageStats.limits.compareAt - usageStats.compareAtUpdates : Infinity;
 
     const processedCombinations = new Set();
     const bulkUpdates = [];
@@ -288,48 +279,12 @@ export const action = async ({ request }) => {
                 continue;
             }
 
-            let rowPriceNeedsUpdate = variantInput.price ? true : false;
-            let rowCompareAtNeedsUpdate = variantInput.compareAtPrice !== undefined ? true : false;
-
-            const priceLimitHit = rowPriceNeedsUpdate && remainingPrice <= 0;
-            const compareAtLimitHit = rowCompareAtNeedsUpdate && remainingCompareAt <= 0;
-
-            if (priceLimitHit && compareAtLimitHit) {
-                results.errors.push(`Limit exceeded for SKU ${sku}: Both Price and Compare-At Price update limits reached`);
-                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Both price and compare at price is not updated, plan limit reached' }));
-                continue;
-            }
-
-            if (priceLimitHit) {
-                // Skip Price update but allow CompareAt if needed (and not limited, which is covered above)
-                delete variantInput.price;
-                rowPriceNeedsUpdate = false;
-                results.errors.push(`Limit exceeded for SKU ${sku}: Price update limit reached`);
-                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Price not updated, plan limit reached' }));
-            }
-
-            if (compareAtLimitHit) {
-                 // Skip CompareAt update
-                delete variantInput.compareAtPrice;
-                rowCompareAtNeedsUpdate = false;
-                results.errors.push(`Limit exceeded for SKU ${sku}: Compare-At Price update limit reached`);
-                results.failedRows.push(normalizeRow(row, { "Error Reason": 'CompareAt Price not updated, plan limit reached' }));
-            }
-
-            if (!rowPriceNeedsUpdate && !rowCompareAtNeedsUpdate) {
-                continue;
-            }
-
-            if (rowPriceNeedsUpdate) remainingPrice--;
-            if (rowCompareAtNeedsUpdate) remainingCompareAt--;
-
             // Determine Reason
-            let updateReason = "";
-            if (rowPriceNeedsUpdate && rowCompareAtNeedsUpdate) {
+            if (variantInput.price && variantInput.compareAtPrice !== undefined) {
                 updateReason = "Price and CompareAt price both updated";
-            } else if (rowPriceNeedsUpdate) {
+            } else if (variantInput.price) {
                 updateReason = "Price updated";
-            } else if (rowCompareAtNeedsUpdate) {
+            } else if (variantInput.compareAtPrice !== undefined) {
                 updateReason = "CompareAt price updated";
             }
 
@@ -443,8 +398,6 @@ export const action = async ({ request }) => {
              if (opId) {
                  results.bulkOperationId = opId;
                  results.expectedUpdateCount = bulkUpdates.length;
-
-                 await incrementUsage(shop, finalPriceUpdatesCount, finalCompareAtUpdatesCount);
              } else {
                  results.errors.push("Failed to trigger backend bulk operation (No ID returned)");
              }
@@ -458,7 +411,7 @@ export const action = async ({ request }) => {
 
 export default function ImportProductPrices() {
     const shopify = useAppBridge();
-    const { usageStats, planName } = useLoaderData();
+    const { planName } = useLoaderData();
     const fetcher = useFetcher();
     const pollFetcher = useFetcher(); 
     const navigate = useNavigate();
@@ -613,86 +566,8 @@ export default function ImportProductPrices() {
 
     const displayResults = finalResults || validatedResults;
 
-    const renderUsageInfo = () => {
-        if (!usageStats) return null;
-
-        const { priceUpdates, compareAtUpdates, limits, priceRemaining, compareAtRemaining } = usageStats;
-        
-        return (
-            <s-box paddingBlockStart="large">
-                <Card>
-                    <BlockStack gap="300">
-                        <InlineStack align="space-between">
-                            <Text variant="headingMd" as="h2">Plan Usage: <Badge tone="info">{planName}</Badge></Text>
-                            <Text variant="bodySm" tone="subdued">Limits Reset On: {new Date(usageStats.nextResetDate).toLocaleDateString()}</Text>
-                        </InlineStack>
-                        
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                            <BlockStack gap="100">
-                                <Text variant="bodyMd" fontWeight="bold">Price Updates</Text>
-                                {limits.price !== null && (
-                                    <Text variant="bodySm">
-                                        {priceUpdates} / {limits.price} used
-                                    </Text>
-                                )}
-                                <Text variant="bodySm" tone={priceRemaining > 0 || limits.price === null ? 'success' : 'critical'}>
-                                    {limits.price === null ? 'No Limit' : `${priceRemaining} left`}
-                                </Text>
-                            </BlockStack>
-
-                            <BlockStack gap="100">
-                                <Text variant="bodyMd" fontWeight="bold">Compare-At Price Updates</Text>
-                                {limits.compareAt !== null && (
-                                    <Text variant="bodySm">
-                                        {compareAtUpdates} / {limits.compareAt} used
-                                    </Text>
-                                )}
-                                <Text variant="bodySm" tone={compareAtRemaining > 0 || limits.compareAt === null ? 'success' : 'critical'}>
-                                    {limits.compareAt === null ? 'No Limit' : `${compareAtRemaining} left`}
-                                </Text>
-                            </BlockStack>
-                        </div>
-                    </BlockStack>
-                </Card>
-            </s-box>
-        );
-    };
-
-    const showUpgradeBanner = usageStats && (
-        (usageStats.limits.price !== null && usageStats.priceRemaining <= 0) ||
-        (usageStats.limits.compareAt !== null && usageStats.compareAtRemaining <= 0)
-    );
-
     return (
         <s-page heading="Import Product Prices">
-            {isStylesLoaded && showUpgradeBanner && (
-                <s-box paddingBlockStart="large">
-                    <Banner
-                        tone="critical"
-                    >
-                        <InlineStack align="space-between" blockAlign="center">
-                            <InlineStack gap="200" blockAlign="center">
-                                <Text as="span" fontWeight="semibold">
-                                    Plan: {planName}
-                                </Text>
-                                <Text as="span" variant="bodyMd" tone="critical">
-                                    You have reached your plan limit.
-                                </Text>
-                            </InlineStack>
-                            <s-button 
-                                onClick={() => navigate('/app/subscription')} 
-                                variant="primary" 
-                                size="slim"
-                            >
-                                Upgrade Plan
-                            </s-button>
-                        </InlineStack>
-                    </Banner>
-                </s-box>
-            )}
-            {renderUsageInfo()}
-
-
             <s-box paddingBlockStart="large">
                 <s-section heading="Upload an Excel file with SKU, Price, and CompareAt Price columns.">
                     <input
