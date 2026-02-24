@@ -75,6 +75,7 @@ export default function App() {
       
       <PolarisAppProvider i18n={translations}>
         <s-app-nav>
+          <s-link href="/app" rel="home">GD: Price Updater Pro</s-link>
           <s-link href="/app/import-product-prices">Import Product Prices</s-link>
           <s-link href="/app/export-product-prices">Export Product Prices</s-link>
           <s-link href="/app/subscription">Subscription</s-link>
