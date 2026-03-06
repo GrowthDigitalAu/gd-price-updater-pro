@@ -32,9 +32,3 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
         run: node scripts/keep-alive.js
-
-      - name: Ping Render service (wake it up)
-        run: |
-          echo "Pinging Render service to prevent spin-down..."
-          curl --silent --max-time 60 --retry 3 --retry-delay 5 "${{ secrets.RENDER_APP_URL }}" -o /dev/null -w "HTTP Status: %{http_code}\n"
-          echo "Render ping complete."
