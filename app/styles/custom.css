@@ -40,3 +40,27 @@
   z-index: 10000;
   animation: loadingBar 1s ease-in-out infinite;
 }
+
+.mapping-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-bottom: 16px;
+}
+
+.mapping-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mapping-grid select {
+  min-height: 36px;
+  border: 1px solid #8a8a8a;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #ffffff;
+  color: #202223;
+}

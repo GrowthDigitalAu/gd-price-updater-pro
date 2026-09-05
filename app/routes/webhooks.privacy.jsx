@@ -19,8 +19,6 @@ export const action = async ({ request }) => {
       console.log(`Handling SHOP_REDACT for ${shop}. Deleting shop data.`);
       try {
         await db.session.deleteMany({ where: { shop } });
-        await db.subscriptionInfo.deleteMany({ where: { shop } });
-        await db.usageTracking.deleteMany({ where: { shop } });
         console.log(`Successfully deleted data for shop ${shop}`);
       } catch (error) {
         console.error(`Error deleting data for shop ${shop}:`, error);

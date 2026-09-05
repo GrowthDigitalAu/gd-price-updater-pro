@@ -38,7 +38,7 @@ export const loader = async ({ request }) => {
     const activeSubscriptions =
       billingJson.data?.currentAppInstallation?.activeSubscriptions || [];
 
-    if (activeSubscriptions.length > 0) {
+    if (activeSubscriptions.some((subscription) => subscription.status === "ACTIVE")) {
       hasActiveSubscription = true;
     }
   } catch (error) {

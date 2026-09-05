@@ -32,11 +32,14 @@ export const loader = async ({ request }) => {
   const billingJson = await billingCheck.json();
   const activeSubscriptions =
     billingJson.data?.currentAppInstallation?.activeSubscriptions || [];
+  const activeSubscription = activeSubscriptions.find(
+    (subscription) => subscription.status === "ACTIVE"
+  );
   
   const shopName = session.shop.replace(".myshopify.com", "");
 
   return {
-    subscription: activeSubscriptions[0] || null,
+    subscription: activeSubscription || null,
     manageUrl: `https://admin.shopify.com/store/${shopName}/charges/gd-price-updator-app/pricing_plans`,
   };
 };
