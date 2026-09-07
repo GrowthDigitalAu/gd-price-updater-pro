@@ -42,9 +42,20 @@
 }
 
 .page-frame {
-  width: min(1120px, calc(100vw - 48px));
-  margin: 0 auto;
-  padding: 32px 0 40px;
+  width: min(1480px, calc(100vw - 56px));
+  margin: 0;
+  padding: 32px 24px 40px;
+}
+
+.app-layout-with-aside {
+  display: grid;
+  grid-template-columns: minmax(720px, 1fr) 320px;
+  gap: 20px;
+  align-items: start;
+}
+
+.primary-workspace {
+  min-width: 0;
 }
 
 .section-gap {
@@ -261,21 +272,76 @@
   min-height: 72px;
 }
 
+.growth-aside {
+  position: sticky;
+  top: 24px;
+}
+
+.growth-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.growth-kicker {
+  margin: 0;
+  color: #008060;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.growth-title {
+  margin: 0;
+  color: #202223;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.growth-list {
+  display: grid;
+  gap: 8px;
+}
+
+.growth-list span {
+  display: block;
+  border-left: 3px solid #91cdff;
+  padding-left: 10px;
+  color: #303030;
+  font-size: 13px;
+}
+
 @media (max-width: 760px) {
   .page-frame {
     width: min(100% - 24px, 1120px);
-    padding-top: 20px;
+    padding: 20px 0 32px;
   }
 
   .workflow-strip,
   .summary-grid,
   .action-grid.two-columns,
-  .action-grid.three-columns {
+  .action-grid.three-columns,
+  .app-layout-with-aside {
     grid-template-columns: 1fr;
   }
 
   .upload-panel {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .growth-aside {
+    position: static;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1180px) {
+  .app-layout-with-aside {
+    grid-template-columns: 1fr;
+  }
+
+  .growth-aside {
+    position: static;
   }
 }

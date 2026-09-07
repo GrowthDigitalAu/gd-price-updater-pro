@@ -316,6 +316,8 @@ export default function ExportProductData() {
     return (
         <s-page heading="Export Product Prices">
             <div className="page-frame">
+                <div className="app-layout-with-aside">
+                    <div className="primary-workspace">
                 <s-section heading="Download Price Workbook">
                     <div className="upload-panel">
                         <div>
@@ -364,6 +366,23 @@ export default function ExportProductData() {
                     </s-text>
                 </div>
             )}
+                    </div>
+                    <aside className="growth-aside" aria-label="Growth Digital Shopify support">
+                        <s-section heading="Need Shopify Help?">
+                            <div className="growth-panel">
+                                <p className="growth-kicker">Growth Digital</p>
+                                <p className="growth-title">Turn exports into automated Shopify workflows.</p>
+                                <p className="panel-copy">Use exported price data as the base for supplier mapping, Google Sheet sync, and scheduled price updates.</p>
+                                <div className="growth-list">
+                                    <span>Google Sheet sync</span>
+                                    <span>Supplier price automation</span>
+                                    <span>Shopify data cleanup</span>
+                                </div>
+                                <s-link href="https://growthdigital.com.au/" target="_blank">Contact Growth Digital</s-link>
+                            </div>
+                        </s-section>
+                    </aside>
+                </div>
             </div>
         </s-page>
     );
