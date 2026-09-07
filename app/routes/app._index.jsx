@@ -9,14 +9,23 @@ export const loader = async ({ request }) => {
 export default function Index() {
 
   return (
-    <s-page>
-      <s-box paddingBlockStart="large" paddingBlockEnd="large">
-        <s-section heading="Use the sidebar to access Import and Export features.">
-          <s-paragraph>
-            This app allows you to bulk edit your product prices in your Shopify store.
-          </s-paragraph>
-        </s-section>
-      </s-box>
+    <s-page heading="Price Updater">
+      <div className="page-frame">
+        <div className="action-grid two-columns">
+          <s-section heading="Import Product Prices">
+            <div className="action-panel">
+              <p className="panel-copy">Upload a supplier sheet or an exported price file, map the columns, preview changes, then update Shopify.</p>
+              <s-link href="/app/import-product-prices">Open import</s-link>
+            </div>
+          </s-section>
+          <s-section heading="Export Product Prices">
+            <div className="action-panel">
+              <p className="panel-copy">Download the current Shopify variant price file with SKUs, options, prices, and compare-at prices.</p>
+              <s-link href="/app/export-product-prices">Open export</s-link>
+            </div>
+          </s-section>
+        </div>
+      </div>
     </s-page>
   );
 }

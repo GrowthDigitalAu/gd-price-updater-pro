@@ -315,18 +315,46 @@ export default function ExportProductData() {
 
     return (
         <s-page heading="Export Product Prices">
-            <s-box paddingBlockStart="large" paddingBlockEnd="large">
-                <s-section heading='Click below to export all product price data.'>
-                    <s-button
-                        variant="primary"
-                        onClick={handleExport}
-                        loading={isLoading ? "true" : undefined}
-                        paddingBlock="large"
-                    >
-                        Export Product Prices
-                    </s-button>
+            <div className="page-frame">
+                <s-section heading="Download Price Workbook">
+                    <div className="upload-panel">
+                        <div>
+                            <p className="panel-title">Current Shopify product prices</p>
+                            <p className="panel-copy">Exports product title, SKU, option values, price, and compare-at price into an Excel workbook.</p>
+                            <div className="file-meta">
+                                <span>Format: .xlsx</span>
+                                <span>Source: Shopify variants</span>
+                            </div>
+                        </div>
+                        <s-button
+                            variant="primary"
+                            onClick={handleExport}
+                            loading={isLoading ? "true" : undefined}
+                        >
+                            Export Product Prices
+                        </s-button>
+                    </div>
                 </s-section>
-            </s-box>
+
+                <div className="section-gap">
+                    <div className="action-grid three-columns">
+                        <s-section heading="Included Columns">
+                            <div className="action-panel compact">
+                                <p className="panel-copy">Product title, SKU, option values, price, and compare-at price.</p>
+                            </div>
+                        </s-section>
+                        <s-section heading="Best Use">
+                            <div className="action-panel compact">
+                                <p className="panel-copy">Use this file as a clean Shopify price template or a backup before supplier imports.</p>
+                            </div>
+                        </s-section>
+                        <s-section heading="Next Workflow">
+                            <div className="action-panel compact">
+                                <p className="panel-copy">Google Sheet scheduled sync can use this same column structure once credentials and scheduling are added.</p>
+                            </div>
+                        </s-section>
+                    </div>
+                </div>
 
             {isProgressVisible && (
                 <div className="progress-container">
@@ -336,6 +364,7 @@ export default function ExportProductData() {
                     </s-text>
                 </div>
             )}
+            </div>
         </s-page>
     );
 }

@@ -80,6 +80,7 @@ SCOPES
 
 - Add downloadable Excel reports for failed, skipped, and updated rows.
 - Add saved supplier templates so repeat suppliers do not need remapping each time.
+- Add Google Sheets sync with saved sheet mapping, scheduled imports, preview logs, and failure notifications.
 - Add support for CSV supplier files.
 - Improve large-store lookup performance by querying only uploaded SKUs or using a dedicated bulk lookup.
 - Reconcile Shopify bulk mutation output back to each SKU after completion.

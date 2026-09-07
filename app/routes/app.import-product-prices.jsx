@@ -655,32 +655,62 @@ export default function ImportProductPrices() {
     }, [isLoading, validatedResults, finalResults]);
 
     const displayResults = finalResults || validatedResults;
+    const selectedFileName = file?.name || "No file selected";
+    const sampleHeaders = headers.slice(0, 6);
+    const sampleRows = parsedData?.slice(0, 3) || [];
+    const isUpdatingShopify = !!validatedResults?.bulkOperationId && !finalResults;
 
     return (
         <s-page heading="Import Product Prices">
-            <s-box paddingBlockStart="large">
-                <s-section heading="Upload an Excel file from your supplier or an exported price file.">
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".xlsx,.xls"
-                        onChange={handleFileChange}
-                        style={{ display: 'none' }}
-                    />
+            <div className="page-frame">
+                <div className="workflow-strip">
+                    <div className={`workflow-step ${file ? "is-complete" : "is-active"}`}>
+                        <span>1</span>
+                        <strong>Upload</strong>
+                    </div>
+                    <div className={`workflow-step ${parsedData?.length > 0 ? "is-active" : ""}`}>
+                        <span>2</span>
+                        <strong>Map columns</strong>
+                    </div>
+                    <div className={`workflow-step ${displayResults?.dryRun ? "is-active" : ""}`}>
+                        <span>3</span>
+                        <strong>Preview</strong>
+                    </div>
+                    <div className={`workflow-step ${finalResults ? "is-complete" : ""}`}>
+                        <span>4</span>
+                        <strong>Update</strong>
+                    </div>
+                </div>
 
-                    <s-button
-                        variant="primary"
-                        onClick={handleButtonClick}
-                        loading={(isLoading || (validatedResults?.bulkOperationId && !finalResults)) ? "true" : undefined}
-                        paddingBlock="large"
-                    >
-                        Choose Excel File
-                    </s-button>
+                <s-section heading="Upload Price File">
+                    <div className="upload-panel">
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".xlsx,.xls"
+                            onChange={handleFileChange}
+                            style={{ display: 'none' }}
+                        />
+                        <div>
+                            <p className="panel-title">Supplier price list or Shopify export</p>
+                            <p className="panel-copy">Accepted format: Excel workbook with a header row and one row per SKU.</p>
+                            <div className="file-meta">
+                                <span>{selectedFileName}</span>
+                                {parsedData?.length > 0 && <span>{parsedData.length} rows loaded</span>}
+                            </div>
+                        </div>
+                        <s-button
+                            variant="primary"
+                            onClick={handleButtonClick}
+                            loading={(isLoading || isUpdatingShopify) ? "true" : undefined}
+                        >
+                            Choose Excel File
+                        </s-button>
+                    </div>
                 </s-section>
-            </s-box>
 
             {parsedData?.length > 0 && (
-                <s-box paddingBlockStart="large">
+                <div className="section-gap">
                     <s-section heading="Map Supplier Columns">
                         <div className="mapping-grid">
                             <label>
@@ -714,7 +744,27 @@ export default function ImportProductPrices() {
                                 </select>
                             </label>
                         </div>
-                        <s-stack gap="200" direction="inline">
+                        {sampleRows.length > 0 && sampleHeaders.length > 0 && (
+                            <div className="sample-table-wrap">
+                                <table className="sample-table">
+                                    <thead>
+                                        <tr>
+                                            {sampleHeaders.map((header) => <th key={header}>{header}</th>)}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {sampleRows.map((row, rowIndex) => (
+                                            <tr key={rowIndex}>
+                                                {sampleHeaders.map((header) => (
+                                                    <td key={header}>{row[header]?.toString() || "-"}</td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                        <div className="button-row">
                             <s-button
                                 variant="primary"
                                 onClick={() => submitImport(true)}
@@ -723,46 +773,58 @@ export default function ImportProductPrices() {
                             >
                                 Preview Changes
                             </s-button>
-                        </s-stack>
+                        </div>
                     </s-section>
-                </s-box>
+                </div>
             )}
 
             {isProgressVisible && (
                 <div className="progress-container">
                     <ProgressBar progress={progress} size="small" />
                     <s-text variant="bodyLg">
-                         {validatedResults?.bulkOperationId && !finalResults ? "Processing price updates..." : "Checking product prices..."}
+                         {isUpdatingShopify ? "Processing price updates..." : "Checking product prices..."}
                     </s-text>
                 </div>
             )}
 
             {displayResults && !isProgressVisible && (
                 <>
-                    <s-box paddingBlockStart="large">
+                    <div className="section-gap">
                         <s-section heading="Import Results">
-                            <s-stack gap="200" direction="block">
-                                <s-text as="p">Total rows: {displayResults.total}</s-text>
-                                <s-text as="p">{displayResults.dryRun ? "Prices ready to update" : "Successfully Updated Price"}: {displayResults.priceUpdatesCount || 0}</s-text>
-                                <s-text as="p">{displayResults.dryRun ? "Compare-at prices ready to update" : "Successfully Updated CompareAt Price"}: {displayResults.compareAtUpdatesCount || 0}</s-text>
-                                <s-text as="p">Errors: {displayResults.errors.length}</s-text>
-                            </s-stack>
+                            <div className="summary-grid">
+                                <div className="summary-tile">
+                                    <span>Total rows</span>
+                                    <strong>{displayResults.total}</strong>
+                                </div>
+                                <div className="summary-tile">
+                                    <span>{displayResults.dryRun ? "Prices ready" : "Prices updated"}</span>
+                                    <strong>{displayResults.priceUpdatesCount || 0}</strong>
+                                </div>
+                                <div className="summary-tile">
+                                    <span>{displayResults.dryRun ? "Compare-at ready" : "Compare-at updated"}</span>
+                                    <strong>{displayResults.compareAtUpdatesCount || 0}</strong>
+                                </div>
+                                <div className={`summary-tile ${displayResults.errors.length > 0 ? "has-errors" : ""}`}>
+                                    <span>Errors</span>
+                                    <strong>{displayResults.errors.length}</strong>
+                                </div>
+                            </div>
                             {displayResults.dryRun && displayResults.updatedRows?.length > 0 && (
-                                <s-box paddingBlockStart="base">
+                                <div className="button-row">
                                     <s-button
                                         variant="primary"
                                         onClick={() => submitImport(false)}
-                                        loading={(isLoading || (validatedResults?.bulkOperationId && !finalResults)) ? "true" : undefined}
+                                        loading={(isLoading || isUpdatingShopify) ? "true" : undefined}
                                     >
                                         Confirm and Update Shopify
                                     </s-button>
-                                </s-box>
+                                </div>
                             )}
                         </s-section>
-                    </s-box>
+                    </div>
 
                     {displayResults.updatedRows?.length > 0 && (
-                        <s-box paddingBlockStart="large">
+                        <div className="section-gap">
                             <s-section heading={displayResults.dryRun ? "Rows Ready to Update" : "Updated Rows"}>
                                 <s-table>
                                     <s-table-header-row>
@@ -795,12 +857,12 @@ export default function ImportProductPrices() {
                                     />
                                 )}
                             </s-section>
-                        </s-box>
+                        </div>
                     )}
 
                     {displayResults.failedRows?.length > 0 && (
-                        <s-box paddingBlockStart="large">
-                            <s-section heading="❌ Failed Rows">
+                        <div className="section-gap">
+                            <s-section heading="Failed Rows">
                                 <s-table>
                                     <s-table-header-row>
                                         {Object.keys(displayResults.failedRows[0] || {}).map((key) => (
@@ -832,12 +894,12 @@ export default function ImportProductPrices() {
                                     />
                                 )}
                             </s-section>
-                        </s-box>
+                        </div>
                     )}
 
                     {displayResults.skippedRows?.length > 0 && (
-                        <s-box paddingBlockStart="large" paddingBlockEnd="large">
-                            <s-section heading="⏭️ Skipped Rows - Prices Already Match">
+                        <div className="section-gap page-bottom">
+                            <s-section heading="Skipped Rows - Prices Already Match">
                                 <s-table>
                                     <s-table-header-row>
                                         {Object.keys(displayResults.skippedRows[0] || {}).map((key) => (
@@ -869,10 +931,11 @@ export default function ImportProductPrices() {
                                     />
                                 )}
                             </s-section>
-                        </s-box>
+                        </div>
                     )}
                 </>
             )}
+            </div>
         </s-page>
     );
 }
