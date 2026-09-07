@@ -6,8 +6,8 @@ export default function HowToUse() {
                     <div className="primary-workspace">
                         <s-section heading="GD: Price Updater Pro">
                             <div className="help-intro">
-                                <p className="panel-title">Bulk update Shopify product prices with Excel.</p>
-                                <p className="panel-copy">Use this app to export Shopify variant pricing, upload supplier price lists, map spreadsheet columns, apply price rules, preview changes, and update product prices safely.</p>
+                                <p className="panel-title">Bulk update Shopify product prices from Excel, Google Sheets, or CSV URLs.</p>
+                                <p className="panel-copy">Use this app to export Shopify variant pricing, upload supplier price lists, load public sheet URLs, map spreadsheet columns, apply price rules, preview changes, and update product prices safely.</p>
                             </div>
                         </s-section>
 
@@ -17,8 +17,8 @@ export default function HowToUse() {
                                     <div className="help-step">
                                         <span>1</span>
                                         <div>
-                                            <strong>Upload your file</strong>
-                                            <p>Choose an Excel workbook from a supplier or an exported Shopify price file.</p>
+                                            <strong>Load your source</strong>
+                                            <p>Choose an Excel workbook, paste a public Google Sheet link, or paste an approved CSV or Excel workbook URL.</p>
                                         </div>
                                     </div>
                                     <div className="help-step">
@@ -86,6 +86,25 @@ export default function HowToUse() {
                                     <div className="help-card">
                                         <strong>Compare-at price is optional</strong>
                                         <p>Keep it unchanged, set it from the file, set it to the old Shopify price, or clear it during the update.</p>
+                                    </div>
+                                </div>
+                            </s-section>
+                        </div>
+
+                        <div className="section-gap">
+                            <s-section heading="Google Sheet and URL Imports">
+                                <div className="help-card-grid">
+                                    <div className="help-card">
+                                        <strong>Public approved links only</strong>
+                                        <p>The sheet or file URL must be accessible to the app. Private Google Sheets need to be shared or published before loading.</p>
+                                    </div>
+                                    <div className="help-card">
+                                        <strong>Google Sheets and supplier URLs</strong>
+                                        <p>Google Sheet links work by default. Other supplier CSV or Excel domains can be approved by support before use.</p>
+                                    </div>
+                                    <div className="help-card">
+                                        <strong>Same preview safety</strong>
+                                        <p>URL imports still go through column mapping, price rules, preview, and confirmation before Shopify is updated.</p>
                                     </div>
                                 </div>
                             </s-section>

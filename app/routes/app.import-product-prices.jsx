@@ -81,6 +81,268 @@ const calculatePrice = ({ mode, currentPrice, filePrice, adjustmentValue, roundi
     return Number(formatMoney(roundPrice(nextPrice, roundingRule)));
 };
 
+const getCellValue = (cell) => {
+    const value = cell?.value;
+
+    if (value === undefined || value === null) {
+        return "";
+    }
+
+    if (typeof value === "object") {
+        if (value.text) return value.text;
+        if (value.result !== undefined) return value.result;
+        if (value.richText) return value.richText.map((part) => part.text).join("");
+        if (value.hyperlink) return value.text || value.hyperlink;
+    }
+
+    return value;
+};
+
+const rowsFromWorksheet = (worksheet) => {
+    const jsonData = [];
+    const headers = [];
+
+    worksheet.getRow(1).eachCell((cell, colNumber) => {
+       headers[colNumber] = cell.value ? String(getCellValue(cell)).trim() : "";
+    });
+
+    const headersInOrder = headers.filter(h => h);
+    worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber > 1) {
+            const rowData = {};
+            row.eachCell((cell, colNumber) => {
+                if (headers[colNumber]) rowData[headers[colNumber]] = getCellValue(cell);
+            });
+            if (Object.values(rowData).some((value) => value !== undefined && value !== null && String(value).trim() !== "")) {
+                jsonData.push(rowData);
+            }
+        }
+    });
+
+    return { rows: jsonData, headers: headersInOrder };
+};
+
+const parseCsvText = (text) => {
+    const rows = [];
+    let currentRow = [];
+    let currentCell = "";
+    let inQuotes = false;
+
+    for (let index = 0; index < text.length; index++) {
+        const char = text[index];
+        const nextChar = text[index + 1];
+
+        if (char === '"' && inQuotes && nextChar === '"') {
+            currentCell += '"';
+            index++;
+        } else if (char === '"') {
+            inQuotes = !inQuotes;
+        } else if (char === "," && !inQuotes) {
+            currentRow.push(currentCell);
+            currentCell = "";
+        } else if ((char === "\n" || char === "\r") && !inQuotes) {
+            if (char === "\r" && nextChar === "\n") index++;
+            currentRow.push(currentCell);
+            rows.push(currentRow);
+            currentRow = [];
+            currentCell = "";
+        } else {
+            currentCell += char;
+        }
+    }
+
+    currentRow.push(currentCell);
+    rows.push(currentRow);
+
+    const headers = (rows.shift() || []).map((header) => String(header || "").trim());
+    const headersInOrder = headers.filter(Boolean);
+    const jsonData = rows
+        .map((row) => {
+            const rowData = {};
+            headers.forEach((header, index) => {
+                if (header) rowData[header] = row[index] || "";
+            });
+            return rowData;
+        })
+        .filter((row) => Object.values(row).some((value) => String(value || "").trim() !== ""));
+
+    return { rows: jsonData, headers: headersInOrder };
+};
+
+const googleSheetCsvUrl = (sourceUrl) => {
+    const url = new URL(sourceUrl);
+
+    if (!url.hostname.includes("docs.google.com") || !url.pathname.includes("/spreadsheets/d/")) {
+        return sourceUrl;
+    }
+
+    const sheetId = url.pathname.split("/spreadsheets/d/")[1]?.split("/")[0];
+    const gid = url.searchParams.get("gid") || "0";
+
+    if (!sheetId) {
+        return sourceUrl;
+    }
+
+    return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+};
+
+const isPrivateHostname = (hostname) => {
+    const normalized = hostname.toLowerCase();
+    return normalized === "localhost"
+        || normalized.endsWith(".localhost")
+        || normalized === "0.0.0.0"
+        || normalized === "127.0.0.1"
+        || normalized === "::1";
+};
+
+const isPrivateIp = (ipAddress) => {
+    if (!ipAddress) return true;
+
+    if (ipAddress.includes(":")) {
+        const normalized = ipAddress.toLowerCase();
+        return normalized === "::1"
+            || normalized.startsWith("fc")
+            || normalized.startsWith("fd")
+            || normalized.startsWith("fe80:");
+    }
+
+    const parts = ipAddress.split(".").map((part) => Number(part));
+    if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) {
+        return true;
+    }
+
+    const [first, second] = parts;
+    return first === 10
+        || first === 127
+        || first === 0
+        || (first === 169 && second === 254)
+        || (first === 172 && second >= 16 && second <= 31)
+        || (first === 192 && second === 168);
+};
+
+const allowedRemoteSourceHosts = () => {
+    const defaultHosts = [
+        "docs.google.com",
+        "raw.githubusercontent.com",
+        "githubusercontent.com",
+        "dl.dropboxusercontent.com",
+        "dropbox.com"
+    ];
+    const configuredHosts = (process.env.ALLOWED_PRICE_SOURCE_HOSTS || "")
+        .split(",")
+        .map((host) => host.trim().toLowerCase())
+        .filter(Boolean);
+
+    return [...new Set([...defaultHosts, ...configuredHosts])];
+};
+
+const isAllowedRemoteSourceHost = (hostname) => {
+    const normalized = hostname.toLowerCase();
+    return allowedRemoteSourceHosts().some((allowedHost) =>
+        normalized === allowedHost || normalized.endsWith(`.${allowedHost}`)
+    );
+};
+
+const validateRemoteUrl = async (sourceUrl) => {
+    const { isIP } = await import("node:net");
+    const { lookup } = await import("node:dns/promises");
+    const url = new URL(sourceUrl);
+
+    if (url.protocol !== "https:") {
+        throw new Error("Use a public HTTPS Google Sheet, CSV, or Excel URL.");
+    }
+
+    if (isPrivateHostname(url.hostname)) {
+        throw new Error("Local or private URLs are not allowed.");
+    }
+
+    if (!isAllowedRemoteSourceHost(url.hostname)) {
+        throw new Error("That URL domain is not approved yet. Use Google Sheets or ask support to approve the supplier domain.");
+    }
+
+    if (isIP(url.hostname)) {
+        if (isPrivateIp(url.hostname)) {
+            throw new Error("Local or private URLs are not allowed.");
+        }
+        return url;
+    }
+
+    const addresses = await lookup(url.hostname, { all: true });
+    if (!addresses.length || addresses.some((entry) => isPrivateIp(entry.address))) {
+        throw new Error("That URL resolves to a private network address, so it cannot be loaded.");
+    }
+
+    return url;
+};
+
+const fetchRemoteUrl = async (sourceUrl, redirectCount = 0) => {
+    if (redirectCount > 5) {
+        throw new Error("Too many redirects while loading the URL.");
+    }
+
+    const validatedUrl = await validateRemoteUrl(sourceUrl);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    let response;
+    try {
+        response = await fetch(validatedUrl, { redirect: "manual", signal: controller.signal });
+    } finally {
+        clearTimeout(timeout);
+    }
+
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (!location) {
+            throw new Error("The URL redirected without a destination.");
+        }
+        const redirectedUrl = new URL(location, validatedUrl).toString();
+        return fetchRemoteUrl(redirectedUrl, redirectCount + 1);
+    }
+
+    return response;
+};
+
+const parseRemotePriceSource = async (sourceUrl) => {
+    if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) {
+        throw new Error("Enter a valid public Google Sheet, CSV, or Excel URL.");
+    }
+
+    const fetchUrl = googleSheetCsvUrl(sourceUrl);
+    const response = await fetchRemoteUrl(fetchUrl);
+
+    if (!response.ok) {
+        throw new Error(`Could not load the URL. The server returned ${response.status}.`);
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    const maxBytes = 15 * 1024 * 1024;
+
+    if (contentLength > maxBytes) {
+        throw new Error("The source file is too large. Use a file under 15 MB.");
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+
+    if (arrayBuffer.byteLength > maxBytes) {
+        throw new Error("The source file is too large. Use a file under 15 MB.");
+    }
+
+    const isExcel = contentType.includes("spreadsheet")
+        || contentType.includes("excel")
+        || /\.(xlsx|xls)(\?|$)/i.test(fetchUrl);
+
+    if (isExcel) {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(arrayBuffer);
+        return rowsFromWorksheet(workbook.worksheets[0]);
+    }
+
+    const text = new TextDecoder("utf-8").decode(arrayBuffer);
+    return parseCsvText(text);
+};
+
 export const loader = async ({ request }) => {
     const { admin } = await authenticate.admin(request);
     const url = new URL(request.url);
@@ -168,6 +430,29 @@ export const loader = async ({ request }) => {
 export const action = async ({ request }) => {
     const { admin } = await authenticate.admin(request);
     const formData = await request.formData();
+    const intent = formData.get("intent");
+
+    if (intent === "loadRemoteSource") {
+        const sourceUrl = String(formData.get("sourceUrl") || "").trim();
+
+        try {
+            const parsedSource = await parseRemotePriceSource(sourceUrl);
+            return {
+                success: true,
+                remoteSource: {
+                    sourceUrl,
+                    rows: parsedSource.rows,
+                    headers: parsedSource.headers
+                }
+            };
+        } catch (error) {
+            return {
+                success: false,
+                remoteSourceError: error.message
+            };
+        }
+    }
+
     const dataString = formData.get("data");
     const headersString = formData.get("headers");
     const mappingString = formData.get("mapping");
@@ -573,9 +858,13 @@ export const action = async ({ request }) => {
 export default function ImportProductPrices() {
     const shopify = useAppBridge();
     const fetcher = useFetcher();
+    const remoteSourceFetcher = useFetcher();
     const pollFetcher = useFetcher(); 
 
     const [file, setFile] = useState(null);
+    const [sourceName, setSourceName] = useState("");
+    const [sourceKind, setSourceKind] = useState("");
+    const [remoteUrl, setRemoteUrl] = useState("");
     const [parsedData, setParsedData] = useState(null);
     const [headers, setHeaders] = useState([]);
     const [columnMapping, setColumnMapping] = useState({
@@ -606,6 +895,7 @@ export default function ImportProductPrices() {
     const updatedRowsPerPage = 10;
 
     const isLoading = fetcher.state === "submitting" || fetcher.state === "loading";
+    const isLoadingRemoteSource = remoteSourceFetcher.state === "submitting" || remoteSourceFetcher.state === "loading";
     const priceModeUsesFile = priceSettings.priceMode === "set_from_file";
     const compareAtModeUsesFile = priceSettings.compareAtMode === "set_from_file";
     const hasValidAdjustment = priceSettings.adjustmentValue !== "" && !Number.isNaN(Number(priceSettings.adjustmentValue)) && Number(priceSettings.adjustmentValue) >= 0;
@@ -619,7 +909,7 @@ export default function ImportProductPrices() {
 
     const submitImport = (isDryRun) => {
         if (!canPreview) {
-            shopify.toast.show("Choose the SKU and Price columns first.", { duration: 5000 });
+            shopify.toast.show("Complete the source, column mapping, and price settings first.", { duration: 5000 });
             return;
         }
 
@@ -633,8 +923,58 @@ export default function ImportProductPrices() {
             mapping: JSON.stringify(columnMapping),
             settings: JSON.stringify(priceSettings),
             dryRun: isDryRun ? "true" : "false",
-            sourceType: "supplier",
-            sourceFileName: file?.name || ""
+            sourceType: sourceKind || "supplier",
+            sourceFileName: sourceName || file?.name || ""
+        }, { method: "POST" });
+    };
+
+    const resetImportState = () => {
+        setFailedPage(1);
+        setSkippedPage(1);
+        setUpdatedPage(1);
+        setValidatedResults(null);
+        setFinalResults(null);
+        setParsedData(null);
+        setSourceKind("");
+        setHeaders([]);
+        setColumnMapping({ sku: "", price: "", compareAtPrice: "" });
+        setPriceSettings({
+            priceMode: "set_from_file",
+            adjustmentValue: "",
+            roundingRule: "none",
+            minimumPriceEnabled: false,
+            minimumPrice: "",
+            compareAtMode: "keep"
+        });
+    };
+
+    const applyLoadedRows = ({ rows, headers: loadedHeaders, name, kind }) => {
+        setParsedData(rows);
+        setHeaders(loadedHeaders);
+        setColumnMapping({
+            sku: guessColumn(loadedHeaders, ["SKU", "Product SKU", "Item SKU", "Item Code", "Code", "Part Number"]),
+            price: guessColumn(loadedHeaders, ["Price", "Wholesale Price", "Sell Price", "Selling Price", "RRP", "Unit Price"]),
+            compareAtPrice: guessColumn(loadedHeaders, ["CompareAt Price", "Compare At Price", "Compare Price", "Was Price", "Retail Price", "RRP"])
+        });
+        setSourceName(name);
+        setSourceKind(kind);
+    };
+
+    const handleRemoteLoad = () => {
+        if (!remoteUrl.trim()) {
+            shopify.toast.show("Paste a Google Sheet, CSV, or Excel URL first.", { duration: 5000 });
+            return;
+        }
+
+        resetImportState();
+        setFile(null);
+        setSourceName("");
+        setSourceKind("");
+        setIsProgressVisible(true);
+        setProgress(15);
+        remoteSourceFetcher.submit({
+            intent: "loadRemoteSource",
+            sourceUrl: remoteUrl.trim()
         }, { method: "POST" });
     };
 
@@ -642,22 +982,8 @@ export default function ImportProductPrices() {
         const selectedFile = e.target.files[0];
         if (selectedFile) {
             setFile(selectedFile);
-            setFailedPage(1);
-            setSkippedPage(1);
-            setUpdatedPage(1);
-            setValidatedResults(null); 
-            setFinalResults(null);
-            setParsedData(null);
-            setHeaders([]);
-            setColumnMapping({ sku: "", price: "", compareAtPrice: "" });
-            setPriceSettings({
-                priceMode: "set_from_file",
-                adjustmentValue: "",
-                roundingRule: "none",
-                minimumPriceEnabled: false,
-                minimumPrice: "",
-                compareAtMode: "keep"
-            });
+            setSourceName("");
+            resetImportState();
 
             e.target.value = ""; 
 
@@ -666,32 +992,14 @@ export default function ImportProductPrices() {
                 const buffer = event.target.result;
                 const workbook = new ExcelJS.Workbook();
                 await workbook.xlsx.load(buffer);
-                const worksheet = workbook.worksheets[0];
-                const jsonData = [];
-                const headers = [];
-                worksheet.getRow(1).eachCell((cell, colNumber) => {
-                   headers[colNumber] = cell.value ? String(cell.value).trim() : "";
+                const parsedWorkbook = rowsFromWorksheet(workbook.worksheets[0]);
+                applyLoadedRows({
+                    rows: parsedWorkbook.rows,
+                    headers: parsedWorkbook.headers,
+                    name: selectedFile.name,
+                    kind: "supplier_file"
                 });
-                const headersInOrder = headers.filter(h => h);
-                worksheet.eachRow((row, rowNumber) => {
-                    if (rowNumber > 1) {
-                        const rowData = {};
-                        row.eachCell((cell, colNumber) => {
-                            if (headers[colNumber]) rowData[headers[colNumber]] = cell.value;
-                        });
-                        if (Object.values(rowData).some((value) => value !== undefined && value !== null && String(value).trim() !== "")) {
-                            jsonData.push(rowData);
-                        }
-                    }
-                });
-                setParsedData(jsonData);
-                setHeaders(headersInOrder);
-                setColumnMapping({
-                    sku: guessColumn(headersInOrder, ["SKU", "Product SKU", "Item SKU", "Item Code", "Code", "Part Number"]),
-                    price: guessColumn(headersInOrder, ["Price", "Wholesale Price", "Sell Price", "Selling Price", "RRP", "Unit Price"]),
-                    compareAtPrice: guessColumn(headersInOrder, ["CompareAt Price", "Compare At Price", "Compare Price", "Was Price", "Retail Price", "RRP"])
-                });
-                shopify.toast.show(`File loaded: ${jsonData.length} rows. Check the column mapping before previewing.`, { duration: 5000 });
+                shopify.toast.show(`File loaded: ${parsedWorkbook.rows.length} rows. Check the column mapping before previewing.`, { duration: 5000 });
             };
             reader.readAsArrayBuffer(selectedFile);
         }
@@ -700,6 +1008,26 @@ export default function ImportProductPrices() {
     const handleButtonClick = () => {
         if (fileInputRef.current) fileInputRef.current.click();
     };
+
+    useEffect(() => {
+        if (remoteSourceFetcher.data && remoteSourceFetcher.state === "idle") {
+            setProgress(100);
+            setTimeout(() => setIsProgressVisible(false), 500);
+
+            if (remoteSourceFetcher.data.success) {
+                const remoteSource = remoteSourceFetcher.data.remoteSource;
+                applyLoadedRows({
+                    rows: remoteSource.rows,
+                    headers: remoteSource.headers,
+                    name: remoteSource.sourceUrl,
+                    kind: "remote_url"
+                });
+                shopify.toast.show(`URL loaded: ${remoteSource.rows.length} rows. Check the column mapping before previewing.`, { duration: 5000 });
+            } else {
+                shopify.toast.show(remoteSourceFetcher.data.remoteSourceError || "Could not load that URL.", { duration: 5000 });
+            }
+        }
+    }, [remoteSourceFetcher.data, remoteSourceFetcher.state]);
 
     useEffect(() => {
         if (fetcher.data?.success && fetcher.state === "idle") {
@@ -754,7 +1082,7 @@ export default function ImportProductPrices() {
     }, [pollFetcher.data, validatedResults]);
 
     useEffect(() => {
-        if (isLoading) {
+        if (isLoading || isLoadingRemoteSource) {
              const interval = setInterval(() => {
                 setProgress((prev) => {
                     if (prev < 30) return prev + 2;
@@ -774,10 +1102,10 @@ export default function ImportProductPrices() {
             }, 500);
             return () => clearInterval(interval);
         }
-    }, [isLoading, validatedResults, finalResults]);
+    }, [isLoading, isLoadingRemoteSource, validatedResults, finalResults]);
 
     const displayResults = finalResults || validatedResults;
-    const selectedFileName = file?.name || "No file selected";
+    const selectedFileName = sourceName || file?.name || "No source selected";
     const sampleHeaders = headers.slice(0, 6);
     const sampleRows = parsedData?.slice(0, 3) || [];
     const isUpdatingShopify = !!validatedResults?.bulkOperationId && !finalResults;
@@ -788,9 +1116,9 @@ export default function ImportProductPrices() {
                 <div className="app-layout-with-aside">
                     <div className="primary-workspace">
                 <div className="workflow-strip">
-                    <div className={`workflow-step ${file ? "is-complete" : "is-active"}`}>
+                    <div className={`workflow-step ${parsedData?.length > 0 ? "is-complete" : "is-active"}`}>
                         <span>1</span>
-                        <strong>Upload</strong>
+                        <strong>Load source</strong>
                     </div>
                     <div className={`workflow-step ${parsedData?.length > 0 ? "is-active" : ""}`}>
                         <span>2</span>
@@ -806,8 +1134,8 @@ export default function ImportProductPrices() {
                     </div>
                 </div>
 
-                <s-section heading="Upload Price File">
-                    <div className="upload-panel">
+                <s-section heading="Load Price Source">
+                    <div className="source-panel">
                         <input
                             ref={fileInputRef}
                             type="file"
@@ -815,21 +1143,38 @@ export default function ImportProductPrices() {
                             onChange={handleFileChange}
                             style={{ display: 'none' }}
                         />
-                        <div>
-                            <p className="panel-title">Supplier price list or Shopify export</p>
-                            <p className="panel-copy">Accepted format: Excel workbook with a header row and one row per SKU.</p>
+                        <div className="source-copy">
+                            <p className="panel-title">Supplier price list, Google Sheet, CSV, or Excel URL</p>
+                            <p className="panel-copy">Use an Excel upload, a public Google Sheet link, a direct CSV link, or a direct Excel workbook URL.</p>
                             <div className="file-meta">
                                 <span>{selectedFileName}</span>
                                 {parsedData?.length > 0 && <span>{parsedData.length} rows loaded</span>}
                             </div>
                         </div>
-                        <s-button
-                            variant="primary"
-                            onClick={handleButtonClick}
-                            loading={(isLoading || isUpdatingShopify) ? "true" : undefined}
-                        >
-                            Choose Excel File
-                        </s-button>
+                        <div className="source-actions">
+                            <s-button
+                                variant="primary"
+                                onClick={handleButtonClick}
+                                loading={(isLoading || isUpdatingShopify) ? "true" : undefined}
+                            >
+                                Choose Excel File
+                            </s-button>
+                            <div className="remote-source-form">
+                                <input
+                                    type="url"
+                                    value={remoteUrl}
+                                    onChange={(event) => setRemoteUrl(event.target.value)}
+                                    placeholder="Paste Google Sheet, CSV, or Excel URL"
+                                />
+                                <s-button
+                                    onClick={handleRemoteLoad}
+                                    loading={isLoadingRemoteSource ? "true" : undefined}
+                                    disabled={(isLoading || isUpdatingShopify) ? "true" : undefined}
+                                >
+                                    Load URL
+                                </s-button>
+                            </div>
+                        </div>
                     </div>
                 </s-section>
 
