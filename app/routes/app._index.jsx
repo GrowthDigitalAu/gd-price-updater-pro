@@ -9,7 +9,7 @@ export const loader = async ({ request }) => {
 export default function Index() {
 
   return (
-    <s-page heading="Price Updater">
+    <s-page heading="Price Updater" inlineSize="large">
       <div className="page-frame">
         <div className="action-grid two-columns">
           <s-section heading="Import Product Prices">

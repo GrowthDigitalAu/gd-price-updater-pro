@@ -42,14 +42,16 @@
 }
 
 .page-frame {
-  width: min(1480px, calc(100vw - 56px));
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
   margin: 0;
-  padding: 32px 24px 40px;
+  padding: 24px 16px 40px;
 }
 
 .app-layout-with-aside {
   display: grid;
-  grid-template-columns: minmax(720px, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 300px;
   gap: 20px;
   align-items: start;
 }
@@ -383,8 +385,7 @@
 
 @media (max-width: 760px) {
   .page-frame {
-    width: min(100% - 24px, 1120px);
-    padding: 20px 0 32px;
+    padding: 20px 12px 32px;
   }
 
   .workflow-strip,

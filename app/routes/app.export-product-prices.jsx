@@ -314,7 +314,7 @@ export default function ExportProductData() {
 
 
     return (
-        <s-page heading="Export Product Prices">
+        <s-page heading="Export Product Prices" inlineSize="large">
             <div className="page-frame">
                 <div className="app-layout-with-aside">
                     <div className="primary-workspace">

@@ -661,7 +661,7 @@ export default function ImportProductPrices() {
     const isUpdatingShopify = !!validatedResults?.bulkOperationId && !finalResults;
 
     return (
-        <s-page heading="Import Product Prices">
+        <s-page heading="Import Product Prices" inlineSize="large">
             <div className="page-frame">
                 <div className="app-layout-with-aside">
                     <div className="primary-workspace">

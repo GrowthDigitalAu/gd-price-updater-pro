@@ -1,6 +1,6 @@
 export default function HowToUse() {
     return (
-        <s-page heading="Help Center">
+        <s-page heading="Help Center" inlineSize="large">
             <div className="page-frame">
                 <div className="help-layout">
                     <div className="primary-workspace">
