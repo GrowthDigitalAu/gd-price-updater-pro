@@ -7,7 +7,7 @@ export default function HowToUse() {
                         <s-section heading="GD: Price Updater Pro">
                             <div className="help-intro">
                                 <p className="panel-title">Bulk update Shopify product prices with Excel.</p>
-                                <p className="panel-copy">Use this app to export Shopify variant pricing, upload supplier price lists, map spreadsheet columns, preview changes, and update product prices safely.</p>
+                                <p className="panel-copy">Use this app to export Shopify variant pricing, upload supplier price lists, map spreadsheet columns, apply price rules, preview changes, and update product prices safely.</p>
                             </div>
                         </s-section>
 
@@ -25,18 +25,25 @@ export default function HowToUse() {
                                         <span>2</span>
                                         <div>
                                             <strong>Map columns</strong>
-                                            <p>Select the column that contains SKU, the column that contains price, and optionally the compare-at price column.</p>
+                                            <p>Select the SKU column, then choose whether prices come from the file or from a bulk price rule.</p>
                                         </div>
                                     </div>
                                     <div className="help-step">
                                         <span>3</span>
+                                        <div>
+                                            <strong>Choose price rules</strong>
+                                            <p>Set prices from the file, increase or decrease current Shopify prices by percent or amount, apply rounding, and control compare-at prices.</p>
+                                        </div>
+                                    </div>
+                                    <div className="help-step">
+                                        <span>4</span>
                                         <div>
                                             <strong>Preview changes</strong>
                                             <p>Review rows ready to update, rows already matching Shopify, failed rows, invalid prices, duplicates, and SKUs not found in Shopify.</p>
                                         </div>
                                     </div>
                                     <div className="help-step">
-                                        <span>4</span>
+                                        <span>5</span>
                                         <div>
                                             <strong>Update Shopify</strong>
                                             <p>Confirm the preview to run the Shopify bulk update in the background.</p>
@@ -73,12 +80,31 @@ export default function HowToUse() {
                                         <p>The app uses SKU to find the matching Shopify variant. Rows without a SKU are ignored or reported as failed.</p>
                                     </div>
                                     <div className="help-card">
-                                        <strong>Price is required for updates</strong>
-                                        <p>The selected price column can contain values like 12.50, $12.50, AUD 12.50, or 1,250.00.</p>
+                                        <strong>Price can come from the file</strong>
+                                        <p>For supplier price imports, the selected price column can contain values like 12.50, $12.50, AUD 12.50, or 1,250.00.</p>
                                     </div>
                                     <div className="help-card">
                                         <strong>Compare-at price is optional</strong>
-                                        <p>Leave it unmapped to avoid changing compare-at prices. Use null to clear an existing compare-at price.</p>
+                                        <p>Keep it unchanged, set it from the file, set it to the old Shopify price, or clear it during the update.</p>
+                                    </div>
+                                </div>
+                            </s-section>
+                        </div>
+
+                        <div className="section-gap">
+                            <s-section heading="Price Update Options">
+                                <div className="help-card-grid">
+                                    <div className="help-card">
+                                        <strong>Bulk markups and discounts</strong>
+                                        <p>Increase or decrease current Shopify prices by a percentage without adding a price column to the file.</p>
+                                    </div>
+                                    <div className="help-card">
+                                        <strong>Fixed price adjustments</strong>
+                                        <p>Add or subtract a fixed amount from each matched SKU, useful for freight, margin, or supplier surcharge changes.</p>
+                                    </div>
+                                    <div className="help-card">
+                                        <strong>Rounding and safeguards</strong>
+                                        <p>Round prices to .99, .95, or the nearest dollar, and set a minimum price so calculated updates do not go too low.</p>
                                     </div>
                                 </div>
                             </s-section>

@@ -170,13 +170,67 @@
   font-weight: 600;
 }
 
-.mapping-grid select {
+.mapping-grid select,
+.settings-grid select,
+.settings-grid input,
+.settings-checkbox input[type="number"] {
   min-height: 36px;
   border: 1px solid #8a8a8a;
   border-radius: 6px;
   padding: 6px 10px;
   background: #ffffff;
   color: #202223;
+}
+
+.mapping-grid select:disabled,
+.settings-grid input:disabled,
+.settings-checkbox input[type="number"]:disabled {
+  border-color: #d9d9d9;
+  background: #f7f7f7;
+  color: #8a8a8a;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 14px;
+  margin: 4px 0 16px;
+  border: 1px solid #e3e3e3;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fafafa;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.settings-grid label,
+.settings-checkbox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-checkbox {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.settings-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #f0583c;
+}
+
+.settings-checkbox input[type="number"] {
+  width: 120px;
 }
 
 .button-row {

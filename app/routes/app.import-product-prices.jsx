@@ -39,6 +39,48 @@ const parseMoneyValue = (value) => {
     return Number(cleaned);
 };
 
+const moneyEquals = (left, right) => Number(left).toFixed(2) === Number(right).toFixed(2);
+
+const formatMoney = (value) => Number(value).toFixed(2);
+
+const roundPrice = (value, roundingRule) => {
+    if (roundingRule === "nearest_1") {
+        return Math.round(value);
+    }
+
+    if (roundingRule === "ending_95") {
+        return Math.max(0, Math.floor(value) + 0.95);
+    }
+
+    if (roundingRule === "ending_99") {
+        return Math.max(0, Math.floor(value) + 0.99);
+    }
+
+    return value;
+};
+
+const calculatePrice = ({ mode, currentPrice, filePrice, adjustmentValue, roundingRule }) => {
+    let nextPrice = null;
+
+    if (mode === "set_from_file") {
+        nextPrice = filePrice;
+    } else if (mode === "increase_percent") {
+        nextPrice = currentPrice * (1 + adjustmentValue / 100);
+    } else if (mode === "decrease_percent") {
+        nextPrice = currentPrice * (1 - adjustmentValue / 100);
+    } else if (mode === "increase_amount") {
+        nextPrice = currentPrice + adjustmentValue;
+    } else if (mode === "decrease_amount") {
+        nextPrice = currentPrice - adjustmentValue;
+    }
+
+    if (nextPrice === null || Number.isNaN(nextPrice)) {
+        return null;
+    }
+
+    return Number(formatMoney(roundPrice(nextPrice, roundingRule)));
+};
+
 export const loader = async ({ request }) => {
     const { admin } = await authenticate.admin(request);
     const url = new URL(request.url);
@@ -129,12 +171,19 @@ export const action = async ({ request }) => {
     const dataString = formData.get("data");
     const headersString = formData.get("headers");
     const mappingString = formData.get("mapping");
+    const settingsString = formData.get("settings");
     const dryRun = formData.get("dryRun") === "true";
     const sourceType = formData.get("sourceType") || "mapped";
     const sourceFileName = formData.get("sourceFileName") || "";
     const rawRows = JSON.parse(dataString);
     const headersFromFrontend = headersString ? JSON.parse(headersString) : null;
     const mapping = mappingString ? JSON.parse(mappingString) : {};
+    const settings = settingsString ? JSON.parse(settingsString) : {};
+    const priceMode = settings.priceMode || "set_from_file";
+    const compareAtMode = settings.compareAtMode || (mapping.compareAtPrice ? "set_from_file" : "keep");
+    const roundingRule = settings.roundingRule || "none";
+    const adjustmentValue = parseMoneyValue(settings.adjustmentValue);
+    const minimumPrice = settings.minimumPriceEnabled ? parseMoneyValue(settings.minimumPrice) : null;
     const skuColumn = mapping.sku || "SKU";
     const priceColumn = mapping.price || "Price";
     const compareAtPriceColumn = Object.prototype.hasOwnProperty.call(mapping, "compareAtPrice")
@@ -202,9 +251,24 @@ export const action = async ({ request }) => {
         return normalized;
     };
 
-    if (!skuColumn || !priceColumn) {
-        results.errors.push("SKU and Price columns are required.");
+    const usesFilePrice = priceMode === "set_from_file";
+    const usesFileCompareAt = compareAtMode === "set_from_file";
+
+    if (!skuColumn || (usesFilePrice && !priceColumn) || (usesFileCompareAt && !compareAtPriceColumn)) {
+        results.errors.push("Choose the required columns for this update.");
         results.failedRows = rawRows.map((row) => normalizeRow(row, { "Error Reason": "Missing column mapping" }));
+        return { success: true, results };
+    }
+
+    if (!usesFilePrice && (adjustmentValue === null || isNaN(adjustmentValue) || adjustmentValue < 0)) {
+        results.errors.push("Enter a valid positive adjustment value.");
+        results.failedRows = rawRows.map((row) => normalizeRow(row, { "Error Reason": "Invalid adjustment value" }));
+        return { success: true, results };
+    }
+
+    if (minimumPrice !== null && (isNaN(minimumPrice) || minimumPrice < 0)) {
+        results.errors.push("Enter a valid minimum price.");
+        results.failedRows = rawRows.map((row) => normalizeRow(row, { "Error Reason": "Invalid minimum price" }));
         return { success: true, results };
     }
 
@@ -266,25 +330,29 @@ export const action = async ({ request }) => {
             const priceRaw = row["Price"];
             const compareAtPriceRaw = row["CompareAt Price"];
 
-            let newPrice = null;
-            if (priceRaw !== undefined && priceRaw !== null && String(priceRaw).trim() !== "") {
+            let filePrice = null;
+            if (usesFilePrice && priceRaw !== undefined && priceRaw !== null && String(priceRaw).trim() !== "") {
                 const parsed = parseMoneyValue(priceRaw);
                 if (isNaN(parsed)) {
                     results.errors.push(`Skipped SKU ${sku}: Invalid Price value '${priceRaw}'`);
                     results.failedRows.push(normalizeRow(row, { "Error Reason": 'Invalid Price value' }));
                     continue;
                 }
-                newPrice = parsed;
+                filePrice = parsed;
+            } else if (usesFilePrice) {
+                results.errors.push(`Skipped SKU ${sku}: Missing Price value`);
+                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Missing Price value' }));
+                continue;
             }
 
-            let newCompareAtPrice = null;
-            let shouldClearCompareAt = false;
-            
-            if (compareAtPriceRaw !== undefined && compareAtPriceRaw !== null) {
+            let fileCompareAtPrice = null;
+            let fileCompareAtIsClear = false;
+
+            if (usesFileCompareAt && compareAtPriceRaw !== undefined && compareAtPriceRaw !== null) {
                 const trimmed = String(compareAtPriceRaw).trim();
                 
                 if (trimmed.toLowerCase() === "null") {
-                    shouldClearCompareAt = true;
+                    fileCompareAtIsClear = true;
                 } else if (trimmed !== "") {
                     const parsed = parseMoneyValue(trimmed);
                     if (isNaN(parsed)) {
@@ -292,8 +360,12 @@ export const action = async ({ request }) => {
                         results.failedRows.push(normalizeRow(row, { "Error Reason": 'Invalid CompareAt Price value' }));
                         continue;
                     }
-                    newCompareAtPrice = parsed;
+                    fileCompareAtPrice = parsed;
                 }
+            } else if (usesFileCompareAt) {
+                results.errors.push(`Skipped SKU ${sku}: Missing Compare-at Price value`);
+                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Missing Compare-at Price value' }));
+                continue;
             }
 
 
@@ -317,19 +389,39 @@ export const action = async ({ request }) => {
             };
 
             let needsUpdate = false;
+            let newPrice = calculatePrice({
+                mode: priceMode,
+                currentPrice: variantData.price,
+                filePrice,
+                adjustmentValue,
+                roundingRule
+            });
 
-            if (newPrice !== null && variantData.price !== newPrice) {
-                variantInput.price = String(newPrice);
+            if (minimumPrice !== null && newPrice !== null && newPrice < minimumPrice) {
+                newPrice = minimumPrice;
+            }
+
+            if (newPrice !== null && newPrice < 0) {
+                results.errors.push(`Skipped SKU ${sku}: Calculated price cannot be below 0`);
+                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Calculated price below 0' }));
+                continue;
+            }
+
+            if (newPrice !== null && !moneyEquals(variantData.price, newPrice)) {
+                variantInput.price = formatMoney(newPrice);
                 needsUpdate = true;
             }
 
-            if (shouldClearCompareAt) {
+            if (compareAtMode === "clear" || fileCompareAtIsClear) {
                 if (variantData.compareAtPrice !== null) {
                     variantInput.compareAtPrice = null;
                     needsUpdate = true;
                 }
-            } else if (newCompareAtPrice !== null && variantData.compareAtPrice !== newCompareAtPrice) {
-                variantInput.compareAtPrice = String(newCompareAtPrice);
+            } else if (compareAtMode === "set_from_file" && fileCompareAtPrice !== null && !moneyEquals(variantData.compareAtPrice || 0, fileCompareAtPrice)) {
+                variantInput.compareAtPrice = formatMoney(fileCompareAtPrice);
+                needsUpdate = true;
+            } else if (compareAtMode === "current_price" && !moneyEquals(variantData.compareAtPrice || 0, variantData.price)) {
+                variantInput.compareAtPrice = formatMoney(variantData.price);
                 needsUpdate = true;
             }
 
@@ -348,7 +440,11 @@ export const action = async ({ request }) => {
                 updateReason = "CompareAt price updated";
             }
 
-            results.updatedRows.push(normalizeRow(row, { "Reason": updateReason }));
+            results.updatedRows.push(normalizeRow(row, {
+                "New Price": variantInput.price || formatMoney(variantData.price),
+                "New Compare-at Price": variantInput.compareAtPrice === null ? "Cleared" : variantInput.compareAtPrice || (variantData.compareAtPrice ? formatMoney(variantData.compareAtPrice) : ""),
+                "Reason": updateReason
+            }));
 
             bulkUpdates.push({
                 productId: variantData.productId,
@@ -487,6 +583,14 @@ export default function ImportProductPrices() {
         price: "",
         compareAtPrice: ""
     });
+    const [priceSettings, setPriceSettings] = useState({
+        priceMode: "set_from_file",
+        adjustmentValue: "",
+        roundingRule: "none",
+        minimumPriceEnabled: false,
+        minimumPrice: "",
+        compareAtMode: "keep"
+    });
     const [progress, setProgress] = useState(0);
     const [isProgressVisible, setIsProgressVisible] = useState(false);
     const fileInputRef = useRef(null);
@@ -502,7 +606,16 @@ export default function ImportProductPrices() {
     const updatedRowsPerPage = 10;
 
     const isLoading = fetcher.state === "submitting" || fetcher.state === "loading";
-    const canPreview = parsedData?.length > 0 && columnMapping.sku && columnMapping.price;
+    const priceModeUsesFile = priceSettings.priceMode === "set_from_file";
+    const compareAtModeUsesFile = priceSettings.compareAtMode === "set_from_file";
+    const hasValidAdjustment = priceSettings.adjustmentValue !== "" && !Number.isNaN(Number(priceSettings.adjustmentValue)) && Number(priceSettings.adjustmentValue) >= 0;
+    const hasValidMinimumPrice = !priceSettings.minimumPriceEnabled || (priceSettings.minimumPrice !== "" && !Number.isNaN(Number(priceSettings.minimumPrice)) && Number(priceSettings.minimumPrice) >= 0);
+    const canPreview = parsedData?.length > 0
+        && columnMapping.sku
+        && (!priceModeUsesFile || columnMapping.price)
+        && (!compareAtModeUsesFile || columnMapping.compareAtPrice)
+        && (priceModeUsesFile || hasValidAdjustment)
+        && hasValidMinimumPrice;
 
     const submitImport = (isDryRun) => {
         if (!canPreview) {
@@ -518,6 +631,7 @@ export default function ImportProductPrices() {
             data: JSON.stringify(parsedData),
             headers: JSON.stringify(headers),
             mapping: JSON.stringify(columnMapping),
+            settings: JSON.stringify(priceSettings),
             dryRun: isDryRun ? "true" : "false",
             sourceType: "supplier",
             sourceFileName: file?.name || ""
@@ -536,6 +650,14 @@ export default function ImportProductPrices() {
             setParsedData(null);
             setHeaders([]);
             setColumnMapping({ sku: "", price: "", compareAtPrice: "" });
+            setPriceSettings({
+                priceMode: "set_from_file",
+                adjustmentValue: "",
+                roundingRule: "none",
+                minimumPriceEnabled: false,
+                minimumPrice: "",
+                compareAtMode: "keep"
+            });
 
             e.target.value = ""; 
 
@@ -730,6 +852,7 @@ export default function ImportProductPrices() {
                                 <select
                                     value={columnMapping.price}
                                     onChange={(event) => setColumnMapping((current) => ({ ...current, price: event.target.value }))}
+                                    disabled={!priceModeUsesFile}
                                 >
                                     <option value="">Select a column</option>
                                     {headers.map((header) => <option key={header} value={header}>{header}</option>)}
@@ -740,10 +863,81 @@ export default function ImportProductPrices() {
                                 <select
                                     value={columnMapping.compareAtPrice}
                                     onChange={(event) => setColumnMapping((current) => ({ ...current, compareAtPrice: event.target.value }))}
+                                    disabled={!compareAtModeUsesFile}
                                 >
                                     <option value="">Do not update</option>
                                     {headers.map((header) => <option key={header} value={header}>{header}</option>)}
                                 </select>
+                            </label>
+                        </div>
+                        <div className="settings-panel">
+                            <div className="settings-grid">
+                                <label>
+                                    <span>Price update rule</span>
+                                    <select
+                                        value={priceSettings.priceMode}
+                                        onChange={(event) => setPriceSettings((current) => ({ ...current, priceMode: event.target.value }))}
+                                    >
+                                        <option value="set_from_file">Set price from file</option>
+                                        <option value="increase_percent">Increase current price by %</option>
+                                        <option value="decrease_percent">Decrease current price by %</option>
+                                        <option value="increase_amount">Increase current price by amount</option>
+                                        <option value="decrease_amount">Decrease current price by amount</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>Adjustment value</span>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={priceSettings.adjustmentValue}
+                                        onChange={(event) => setPriceSettings((current) => ({ ...current, adjustmentValue: event.target.value }))}
+                                        disabled={priceModeUsesFile}
+                                        placeholder={priceModeUsesFile ? "Not needed" : "Example: 10"}
+                                    />
+                                </label>
+                                <label>
+                                    <span>Rounding</span>
+                                    <select
+                                        value={priceSettings.roundingRule}
+                                        onChange={(event) => setPriceSettings((current) => ({ ...current, roundingRule: event.target.value }))}
+                                    >
+                                        <option value="none">No rounding</option>
+                                        <option value="ending_99">End in .99</option>
+                                        <option value="ending_95">End in .95</option>
+                                        <option value="nearest_1">Nearest dollar</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>Compare-at price</span>
+                                    <select
+                                        value={priceSettings.compareAtMode}
+                                        onChange={(event) => setPriceSettings((current) => ({ ...current, compareAtMode: event.target.value }))}
+                                    >
+                                        <option value="keep">Keep unchanged</option>
+                                        <option value="set_from_file">Set from file</option>
+                                        <option value="current_price">Set to current price before update</option>
+                                        <option value="clear">Clear compare-at price</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <label className="settings-checkbox">
+                                <input
+                                    type="checkbox"
+                                    checked={priceSettings.minimumPriceEnabled}
+                                    onChange={(event) => setPriceSettings((current) => ({ ...current, minimumPriceEnabled: event.target.checked }))}
+                                />
+                                <span>Do not let calculated prices go below</span>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={priceSettings.minimumPrice}
+                                    onChange={(event) => setPriceSettings((current) => ({ ...current, minimumPrice: event.target.value }))}
+                                    disabled={!priceSettings.minimumPriceEnabled}
+                                    placeholder="0.00"
+                                />
                             </label>
                         </div>
                         {sampleRows.length > 0 && sampleHeaders.length > 0 && (
