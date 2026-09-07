@@ -941,7 +941,10 @@ export default function ImportProductPrices() {
                     <aside className="growth-aside" aria-label="Growth Digital Shopify support">
                         <s-section heading="Need Shopify Help?">
                             <div className="growth-panel">
-                                <p className="growth-kicker">Growth Digital</p>
+                                <div className="growth-brand">
+                                    <span className="growth-brand-icon" aria-hidden="true">GD</span>
+                                    <p className="growth-kicker">Growth Digital</p>
+                                </div>
                                 <p className="growth-title">Get help with Shopify pricing, product feeds, and store growth.</p>
                                 <p className="panel-copy">We can help clean supplier data, automate price updates, improve product setup, and connect your store workflows.</p>
                                 <div className="growth-list">

@@ -107,7 +107,10 @@ export default function HowToUse() {
                     <aside className="growth-aside" aria-label="Help and support">
                         <s-section heading="Support">
                             <div className="growth-panel">
-                                <p className="growth-kicker">Growth Digital</p>
+                                <div className="growth-brand">
+                                    <span className="growth-brand-icon" aria-hidden="true">GD</span>
+                                    <p className="growth-kicker">Growth Digital</p>
+                                </div>
                                 <p className="growth-title">Need help with supplier files or Shopify price updates?</p>
                                 <p className="panel-copy">Email us with the store name, supplier file, and what you expected to happen.</p>
                                 <div className="growth-list">

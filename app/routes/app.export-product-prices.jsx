@@ -370,7 +370,10 @@ export default function ExportProductData() {
                     <aside className="growth-aside" aria-label="Growth Digital Shopify support">
                         <s-section heading="Need Shopify Help?">
                             <div className="growth-panel">
-                                <p className="growth-kicker">Growth Digital</p>
+                                <div className="growth-brand">
+                                    <span className="growth-brand-icon" aria-hidden="true">GD</span>
+                                    <p className="growth-kicker">Growth Digital</p>
+                                </div>
                                 <p className="growth-title">Turn exports into automated Shopify workflows.</p>
                                 <p className="panel-copy">Use exported price data as the base for supplier mapping, Google Sheet sync, and scheduled price updates.</p>
                                 <div className="growth-list">

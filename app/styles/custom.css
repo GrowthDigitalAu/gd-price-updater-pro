@@ -285,9 +285,28 @@
   gap: 14px;
 }
 
+.growth-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.growth-brand-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #f0583c;
+  color: #1c1c1c;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .growth-kicker {
   margin: 0;
-  color: #008060;
+  color: #f0583c;
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -308,7 +327,7 @@
 
 .growth-list span {
   display: block;
-  border-left: 3px solid #91cdff;
+  border-left: 3px solid #f0583c;
   padding-left: 10px;
   color: #303030;
   font-size: 13px;
