@@ -283,6 +283,8 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  border-top: 3px solid #f0583c;
+  padding-top: 4px;
 }
 
 .growth-brand {
@@ -331,6 +333,19 @@
   padding-left: 10px;
   color: #303030;
   font-size: 13px;
+}
+
+.growth-link {
+  color: #f0583c;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.growth-link:hover,
+.growth-link:focus {
+  color: #1c1c1c;
+  text-decoration: underline;
 }
 
 .help-layout {

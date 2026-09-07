@@ -118,7 +118,7 @@ export default function HowToUse() {
                                     <span>Supplier sheet setup</span>
                                     <span>Shopify automation planning</span>
                                 </div>
-                                <s-link href="mailto:dev@growthdigital.com.au">Email support</s-link>
+                                <a className="growth-link" href="mailto:dev@growthdigital.com.au">Email support</a>
                             </div>
                         </s-section>
                     </aside>

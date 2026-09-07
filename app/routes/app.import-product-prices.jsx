@@ -952,7 +952,7 @@ export default function ImportProductPrices() {
                                     <span>Product feed cleanup</span>
                                     <span>Google Sheet sync planning</span>
                                 </div>
-                                <s-link href="https://growthdigital.com.au/" target="_blank">Contact Growth Digital</s-link>
+                                <a className="growth-link" href="https://growthdigital.com.au/" target="_blank" rel="noreferrer">Contact Growth Digital</a>
                             </div>
                         </s-section>
                     </aside>
