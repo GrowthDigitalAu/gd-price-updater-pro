@@ -1,15 +1,21 @@
 /* Progress Bar Styles */
 .progress-container {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 1000;
+  position: static;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  width: 300px;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  margin: 16px 0;
+  border: 1px solid #e3e3e3;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+.progress-container s-text {
+  color: #303030;
 }
 
 /* Progress Bar Color */

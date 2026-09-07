@@ -1285,6 +1285,14 @@ export default function ImportProductPrices() {
                                 />
                             </label>
                         </div>
+                        {isProgressVisible && (
+                            <div className="progress-container">
+                                <ProgressBar progress={progress} size="small" />
+                                <s-text variant="bodyLg">
+                                     {isUpdatingShopify ? "Processing price updates..." : "Checking product prices..."}
+                                </s-text>
+                            </div>
+                        )}
                         {sampleRows.length > 0 && sampleHeaders.length > 0 && (
                             <div className="sample-table-wrap">
                                 <table className="sample-table">
@@ -1316,15 +1324,6 @@ export default function ImportProductPrices() {
                             </s-button>
                         </div>
                     </s-section>
-                </div>
-            )}
-
-            {isProgressVisible && (
-                <div className="progress-container">
-                    <ProgressBar progress={progress} size="small" />
-                    <s-text variant="bodyLg">
-                         {isUpdatingShopify ? "Processing price updates..." : "Checking product prices..."}
-                    </s-text>
                 </div>
             )}
 

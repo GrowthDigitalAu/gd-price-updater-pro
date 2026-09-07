@@ -336,6 +336,14 @@ export default function ExportProductData() {
                             Export Product Prices
                         </s-button>
                     </div>
+                    {isProgressVisible && (
+                        <div className="progress-container">
+                            <ProgressBar progress={progress} size="small" />
+                            <s-text variant="bodyLg">
+                                 {statusMessage || "Processing..."}
+                            </s-text>
+                        </div>
+                    )}
                 </s-section>
 
                 <div className="section-gap">
@@ -358,14 +366,6 @@ export default function ExportProductData() {
                     </div>
                 </div>
 
-            {isProgressVisible && (
-                <div className="progress-container">
-                    <ProgressBar progress={progress} size="small" />
-                    <s-text variant="bodyLg">
-                         {statusMessage || "Processing..."}
-                    </s-text>
-                </div>
-            )}
                     </div>
                     <aside className="growth-aside" aria-label="Growth Digital Shopify support">
                         <s-section heading="Need Shopify Help?">
