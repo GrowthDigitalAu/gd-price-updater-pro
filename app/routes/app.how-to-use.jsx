@@ -18,7 +18,7 @@ export default function HowToUse() {
                                         <span>1</span>
                                         <div>
                                             <strong>Load your source</strong>
-                                            <p>Choose an Excel workbook, paste a public Google Sheet link, or paste an approved CSV or Excel workbook URL.</p>
+                                            <p>Choose an Excel or CSV file, paste a public Google Sheet link, or paste an approved CSV or Excel workbook URL.</p>
                                         </div>
                                     </div>
                                     <div className="help-step">
@@ -32,21 +32,21 @@ export default function HowToUse() {
                                         <span>3</span>
                                         <div>
                                             <strong>Choose price rules</strong>
-                                            <p>Set prices from the file, increase or decrease current Shopify prices by percent or amount, apply rounding, and control compare-at prices.</p>
+                                            <p>Set prices from the file, increase or decrease current Shopify prices by percent or amount, apply rounding, set a minimum price, choose how duplicates are handled, and control compare-at prices.</p>
                                         </div>
                                     </div>
                                     <div className="help-step">
                                         <span>4</span>
                                         <div>
                                             <strong>Preview changes</strong>
-                                            <p>Review rows ready to update, rows already matching Shopify, failed rows, invalid prices, duplicates, and SKUs not found in Shopify.</p>
+                                            <p>Review old price, new price, compare-at changes, warnings, rows already matching Shopify, failed rows, invalid prices, duplicates, and SKUs not found in Shopify.</p>
                                         </div>
                                     </div>
                                     <div className="help-step">
                                         <span>5</span>
                                         <div>
                                             <strong>Update Shopify</strong>
-                                            <p>Confirm the preview to run the Shopify bulk update in the background.</p>
+                                            <p>Download a backup or report if needed, then confirm the preview to run the Shopify bulk update in the background.</p>
                                         </div>
                                     </div>
                                 </div>
@@ -87,6 +87,14 @@ export default function HowToUse() {
                                         <strong>Compare-at price is optional</strong>
                                         <p>Keep it unchanged, set it from the file, set it to the old Shopify price, or clear it during the update.</p>
                                     </div>
+                                    <div className="help-card">
+                                        <strong>Duplicate SKUs can be controlled</strong>
+                                        <p>Fail duplicate SKUs, use the first matching row, or use the last matching row before previewing changes.</p>
+                                    </div>
+                                    <div className="help-card">
+                                        <strong>CSV files are supported</strong>
+                                        <p>Upload supplier CSV files directly when the first row contains column names.</p>
+                                    </div>
                                 </div>
                             </s-section>
                         </div>
@@ -124,6 +132,33 @@ export default function HowToUse() {
                                     <div className="help-card">
                                         <strong>Rounding and safeguards</strong>
                                         <p>Round prices to .99, .95, or the nearest dollar, and set a minimum price so calculated updates do not go too low.</p>
+                                    </div>
+                                    <div className="help-card">
+                                        <strong>Warning checks</strong>
+                                        <p>Large price changes and compare-at prices that are not higher than the price are flagged before update.</p>
+                                    </div>
+                                    <div className="help-card">
+                                        <strong>Remember mapping</strong>
+                                        <p>Save column mapping and price rules in the browser so repeat supplier uploads are faster.</p>
+                                    </div>
+                                </div>
+                            </s-section>
+                        </div>
+
+                        <div className="section-gap">
+                            <s-section heading="Reports and Rollback">
+                                <div className="help-card-grid">
+                                    <div className="help-card">
+                                        <strong>Preview report</strong>
+                                        <p>Download an Excel report with updated, warning, failed, and skipped rows before confirming changes.</p>
+                                    </div>
+                                    <div className="help-card">
+                                        <strong>Rollback file</strong>
+                                        <p>Download a rollback workbook containing the old Shopify prices for SKUs that are ready to update.</p>
+                                    </div>
+                                    <div className="help-card">
+                                        <strong>Update report</strong>
+                                        <p>After an update, download the result report for records or support review.</p>
                                     </div>
                                 </div>
                             </s-section>

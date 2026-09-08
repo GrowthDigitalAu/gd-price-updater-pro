@@ -341,6 +341,15 @@
   background: #fff4f4;
 }
 
+.summary-tile.has-warnings {
+  border-color: #f0583c;
+  background: #fff7f4;
+}
+
+.summary-tile.has-warnings strong {
+  color: #f0583c;
+}
+
 .action-grid {
   display: grid;
   gap: 16px;

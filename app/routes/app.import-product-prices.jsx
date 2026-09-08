@@ -343,6 +343,26 @@ const parseRemotePriceSource = async (sourceUrl) => {
     return parseCsvText(text);
 };
 
+const tableColumns = (row) => {
+    const preferred = [
+        "SKU",
+        "Status",
+        "Current Price",
+        "New Price",
+        "Current Compare-at Price",
+        "New Compare-at Price",
+        "Change %",
+        "Reason",
+        "Warning",
+        "Error Reason"
+    ];
+    const keys = Object.keys(row || {});
+    return [
+        ...preferred.filter((key) => keys.includes(key)),
+        ...keys.filter((key) => !preferred.includes(key))
+    ];
+};
+
 export const loader = async ({ request }) => {
     const { admin } = await authenticate.admin(request);
     const url = new URL(request.url);
@@ -467,6 +487,7 @@ export const action = async ({ request }) => {
     const priceMode = settings.priceMode || "set_from_file";
     const compareAtMode = settings.compareAtMode || (mapping.compareAtPrice ? "set_from_file" : "keep");
     const roundingRule = settings.roundingRule || "none";
+    const duplicateMode = settings.duplicateMode || "fail_duplicates";
     const adjustmentValue = parseMoneyValue(settings.adjustmentValue);
     const minimumPrice = settings.minimumPriceEnabled ? parseMoneyValue(settings.minimumPrice) : null;
     const skuColumn = mapping.sku || "SKU";
@@ -491,6 +512,19 @@ export const action = async ({ request }) => {
         failedRows: [],
         skippedRows: [],
         updatedRows: [],
+        warningRows: [],
+        rollbackRows: [],
+        counts: {
+            matched: 0,
+            updated: 0,
+            unchanged: 0,
+            failed: 0,
+            missingSku: 0,
+            missingShopifySku: 0,
+            duplicateSku: 0,
+            invalidPrice: 0,
+            warnings: 0
+        },
         priceUpdatesCount: 0,
         compareAtUpdatesCount: 0,
         bulkOperationId: null
@@ -604,13 +638,47 @@ export const action = async ({ request }) => {
 
     const processedCombinations = new Set();
     const bulkUpdates = [];
+    const skuIndexes = new Map();
 
-    for (const row of rows) {
+    rows.forEach((row, rowIndex) => {
+        const sku = row["SKU"] ? String(row["SKU"]).trim().toLowerCase() : "";
+        if (!sku || sku === "sku") return;
+        if (!skuIndexes.has(sku)) skuIndexes.set(sku, []);
+        skuIndexes.get(sku).push(rowIndex);
+    });
+
+    for (const [rowIndex, row] of rows.entries()) {
         try {
-            if (!row["SKU"] || row["SKU"] === "SKU") continue;
+            if (!row["SKU"] || row["SKU"] === "SKU") {
+                results.counts.missingSku++;
+                results.failedRows.push(normalizeRow(row, { "Status": "Failed", "Error Reason": 'Missing SKU' }));
+                continue;
+            }
 
             const sku = String(row["SKU"]).trim();
             const skuKey = sku.toLowerCase();
+            const duplicateIndexes = skuIndexes.get(skuKey) || [];
+
+            if (duplicateIndexes.length > 1) {
+                if (duplicateMode === "fail_duplicates") {
+                    results.counts.duplicateSku++;
+                    results.errors.push(`Skipped SKU ${sku}: Duplicate SKU in file`);
+                    results.failedRows.push(normalizeRow(row, { "Status": "Failed", "Error Reason": 'Duplicate SKU in file' }));
+                    continue;
+                }
+
+                if (duplicateMode === "use_first" && rowIndex !== duplicateIndexes[0]) {
+                    results.counts.duplicateSku++;
+                    results.skippedRows.push(normalizeRow(row, { "Status": "Skipped", "Reason": 'Duplicate SKU skipped; first row used' }));
+                    continue;
+                }
+
+                if (duplicateMode === "use_last" && rowIndex !== duplicateIndexes[duplicateIndexes.length - 1]) {
+                    results.counts.duplicateSku++;
+                    results.skippedRows.push(normalizeRow(row, { "Status": "Skipped", "Reason": 'Duplicate SKU skipped; last row used' }));
+                    continue;
+                }
+            }
             
             const priceRaw = row["Price"];
             const compareAtPriceRaw = row["CompareAt Price"];
@@ -619,14 +687,15 @@ export const action = async ({ request }) => {
             if (usesFilePrice && priceRaw !== undefined && priceRaw !== null && String(priceRaw).trim() !== "") {
                 const parsed = parseMoneyValue(priceRaw);
                 if (isNaN(parsed)) {
+                    results.counts.invalidPrice++;
                     results.errors.push(`Skipped SKU ${sku}: Invalid Price value '${priceRaw}'`);
-                    results.failedRows.push(normalizeRow(row, { "Error Reason": 'Invalid Price value' }));
+                    results.failedRows.push(normalizeRow(row, { "Status": "Failed", "Error Reason": 'Invalid Price value' }));
                     continue;
                 }
                 filePrice = parsed;
             } else if (usesFilePrice) {
                 results.errors.push(`Skipped SKU ${sku}: Missing Price value`);
-                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Missing Price value' }));
+                results.failedRows.push(normalizeRow(row, { "Status": "Failed", "Error Reason": 'Missing Price value' }));
                 continue;
             }
 
@@ -641,22 +710,23 @@ export const action = async ({ request }) => {
                 } else if (trimmed !== "") {
                     const parsed = parseMoneyValue(trimmed);
                     if (isNaN(parsed)) {
+                        results.counts.invalidPrice++;
                         results.errors.push(`Skipped SKU ${sku}: Invalid CompareAt Price value '${compareAtPriceRaw}'`);
-                        results.failedRows.push(normalizeRow(row, { "Error Reason": 'Invalid CompareAt Price value' }));
+                        results.failedRows.push(normalizeRow(row, { "Status": "Failed", "Error Reason": 'Invalid CompareAt Price value' }));
                         continue;
                     }
                     fileCompareAtPrice = parsed;
                 }
             } else if (usesFileCompareAt) {
                 results.errors.push(`Skipped SKU ${sku}: Missing Compare-at Price value`);
-                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Missing Compare-at Price value' }));
+                results.failedRows.push(normalizeRow(row, { "Status": "Failed", "Error Reason": 'Missing Compare-at Price value' }));
                 continue;
             }
 
 
             if (processedCombinations.has(skuKey)) {
                 results.errors.push(`Skipped SKU ${sku}: Duplicate SKU in file`);
-                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Duplicate SKU in file' }));
+                results.failedRows.push(normalizeRow(row, { "Status": "Failed", "Error Reason": 'Duplicate SKU in file' }));
                 continue;
             }
             processedCombinations.add(skuKey);
@@ -664,10 +734,13 @@ export const action = async ({ request }) => {
             const variantData = skuMap.get(skuKey);
             
             if (!variantData) {
+                results.counts.missingShopifySku++;
                 results.errors.push(`Variant not found for SKU: ${sku}`);
-                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Variant not found' }));
+                results.failedRows.push(normalizeRow(row, { "Status": "Failed", "Error Reason": 'Variant not found' }));
                 continue;
             }
+
+            results.counts.matched++;
 
             const variantInput = {
                 id: variantData.id
@@ -688,7 +761,7 @@ export const action = async ({ request }) => {
 
             if (newPrice !== null && newPrice < 0) {
                 results.errors.push(`Skipped SKU ${sku}: Calculated price cannot be below 0`);
-                results.failedRows.push(normalizeRow(row, { "Error Reason": 'Calculated price below 0' }));
+                results.failedRows.push(normalizeRow(row, { "Status": "Failed", "Error Reason": 'Calculated price below 0' }));
                 continue;
             }
 
@@ -710,8 +783,49 @@ export const action = async ({ request }) => {
                 needsUpdate = true;
             }
 
+            const finalPrice = variantInput.price || formatMoney(variantData.price);
+            const finalCompareAtPrice = variantInput.compareAtPrice === null
+                ? ""
+                : variantInput.compareAtPrice || (variantData.compareAtPrice ? formatMoney(variantData.compareAtPrice) : "");
+            const currentCompareAtPrice = variantData.compareAtPrice ? formatMoney(variantData.compareAtPrice) : "";
+            const priceChangePercent = variantData.price > 0
+                ? (((Number(finalPrice) - variantData.price) / variantData.price) * 100)
+                : 0;
+            const warnings = [];
+
+            if (Math.abs(priceChangePercent) >= 50) {
+                warnings.push(`Large price change ${priceChangePercent.toFixed(1)}%`);
+            }
+
+            if (finalCompareAtPrice && Number(finalCompareAtPrice) <= Number(finalPrice)) {
+                warnings.push("Compare-at price is not higher than price");
+            }
+
+            if (warnings.length > 0) {
+                results.counts.warnings++;
+                results.warningRows.push(normalizeRow(row, {
+                    "Status": "Warning",
+                    "Current Price": formatMoney(variantData.price),
+                    "New Price": finalPrice,
+                    "Current Compare-at Price": currentCompareAtPrice,
+                    "New Compare-at Price": variantInput.compareAtPrice === null ? "Cleared" : finalCompareAtPrice,
+                    "Change %": `${priceChangePercent.toFixed(1)}%`,
+                    "Warning": warnings.join("; ")
+                }));
+            }
+
             if (!needsUpdate) {
-                results.skippedRows.push(normalizeRow(row, { "Reason": 'Prices already match' }));
+                results.counts.unchanged++;
+                results.skippedRows.push(normalizeRow(row, {
+                    "Status": "Skipped",
+                    "Current Price": formatMoney(variantData.price),
+                    "New Price": finalPrice,
+                    "Current Compare-at Price": currentCompareAtPrice,
+                    "New Compare-at Price": finalCompareAtPrice,
+                    "Change %": "0.0%",
+                    "Reason": 'Prices already match',
+                    "Warning": warnings.join("; ")
+                }));
                 continue;
             }
 
@@ -726,10 +840,21 @@ export const action = async ({ request }) => {
             }
 
             results.updatedRows.push(normalizeRow(row, {
-                "New Price": variantInput.price || formatMoney(variantData.price),
-                "New Compare-at Price": variantInput.compareAtPrice === null ? "Cleared" : variantInput.compareAtPrice || (variantData.compareAtPrice ? formatMoney(variantData.compareAtPrice) : ""),
+                "Status": dryRun ? "Ready" : "Submitted",
+                "Current Price": formatMoney(variantData.price),
+                "New Price": finalPrice,
+                "Current Compare-at Price": currentCompareAtPrice,
+                "New Compare-at Price": variantInput.compareAtPrice === null ? "Cleared" : finalCompareAtPrice,
+                "Change %": `${priceChangePercent.toFixed(1)}%`,
                 "Reason": updateReason
             }));
+
+            results.rollbackRows.push({
+                SKU: sku,
+                Price: formatMoney(variantData.price),
+                "CompareAt Price": currentCompareAtPrice || "null",
+                "Rollback Reason": `Restore price before ${sourceFileName || "import"}`
+            });
 
             bulkUpdates.push({
                 productId: variantData.productId,
@@ -738,7 +863,7 @@ export const action = async ({ request }) => {
 
         } catch (error) {
             results.errors.push(`Error processing SKU ${row["SKU"]}: ${error.message}`);
-            results.failedRows.push(normalizeRow(row, { "Error Reason": error.message }));
+            results.failedRows.push(normalizeRow(row, { "Status": "Failed", "Error Reason": error.message }));
         }
     }
 
@@ -752,6 +877,8 @@ export const action = async ({ request }) => {
 
     results.priceUpdatesCount = finalPriceUpdatesCount;
     results.compareAtUpdatesCount = finalCompareAtUpdatesCount;
+    results.counts.updated = bulkUpdates.length;
+    results.counts.failed = results.failedRows.length;
 
     if (bulkUpdates.length === 0) {
         return { success: true, results };
@@ -878,7 +1005,8 @@ export default function ImportProductPrices() {
         roundingRule: "none",
         minimumPriceEnabled: false,
         minimumPrice: "",
-        compareAtMode: "keep"
+        compareAtMode: "keep",
+        duplicateMode: "fail_duplicates"
     });
     const [progress, setProgress] = useState(0);
     const [isProgressVisible, setIsProgressVisible] = useState(false);
@@ -917,6 +1045,14 @@ export default function ImportProductPrices() {
         setFinalResults(null);
         setIsProgressVisible(true);
         setProgress(isDryRun ? 15 : 10);
+        try {
+            window.localStorage.setItem("gd-price-updater-import-preset", JSON.stringify({
+                columnMapping,
+                priceSettings
+            }));
+        } catch (error) {
+            // Browser storage is optional; the import can continue without it.
+        }
         fetcher.submit({
             data: JSON.stringify(parsedData),
             headers: JSON.stringify(headers),
@@ -944,18 +1080,30 @@ export default function ImportProductPrices() {
             roundingRule: "none",
             minimumPriceEnabled: false,
             minimumPrice: "",
-            compareAtMode: "keep"
+            compareAtMode: "keep",
+            duplicateMode: "fail_duplicates"
         });
     };
 
     const applyLoadedRows = ({ rows, headers: loadedHeaders, name, kind }) => {
+        let savedPreset = null;
+        try {
+            savedPreset = JSON.parse(window.localStorage.getItem("gd-price-updater-import-preset") || "null");
+        } catch (error) {
+            savedPreset = null;
+        }
+        const savedMapping = savedPreset?.columnMapping || {};
+        const savedSettings = savedPreset?.priceSettings || {};
+        const savedHeaderExists = (header) => header && loadedHeaders.includes(header);
+
         setParsedData(rows);
         setHeaders(loadedHeaders);
         setColumnMapping({
-            sku: guessColumn(loadedHeaders, ["SKU", "Product SKU", "Item SKU", "Item Code", "Code", "Part Number"]),
-            price: guessColumn(loadedHeaders, ["Price", "Wholesale Price", "Sell Price", "Selling Price", "RRP", "Unit Price"]),
-            compareAtPrice: guessColumn(loadedHeaders, ["CompareAt Price", "Compare At Price", "Compare Price", "Was Price", "Retail Price", "RRP"])
+            sku: savedHeaderExists(savedMapping.sku) ? savedMapping.sku : guessColumn(loadedHeaders, ["SKU", "Product SKU", "Item SKU", "Item Code", "Code", "Part Number"]),
+            price: savedHeaderExists(savedMapping.price) ? savedMapping.price : guessColumn(loadedHeaders, ["Price", "Wholesale Price", "Sell Price", "Selling Price", "RRP", "Unit Price"]),
+            compareAtPrice: savedHeaderExists(savedMapping.compareAtPrice) ? savedMapping.compareAtPrice : guessColumn(loadedHeaders, ["CompareAt Price", "Compare At Price", "Compare Price", "Was Price", "Retail Price", "RRP"])
         });
+        setPriceSettings((current) => ({ ...current, ...savedSettings }));
         setSourceName(name);
         setSourceKind(kind);
     };
@@ -989,10 +1137,17 @@ export default function ImportProductPrices() {
 
             const reader = new FileReader();
             reader.onload = async (event) => {
-                const buffer = event.target.result;
-                const workbook = new ExcelJS.Workbook();
-                await workbook.xlsx.load(buffer);
-                const parsedWorkbook = rowsFromWorksheet(workbook.worksheets[0]);
+                const isCsv = selectedFile.name.toLowerCase().endsWith(".csv");
+                let parsedWorkbook;
+
+                if (isCsv) {
+                    parsedWorkbook = parseCsvText(event.target.result);
+                } else {
+                    const workbook = new ExcelJS.Workbook();
+                    await workbook.xlsx.load(event.target.result);
+                    parsedWorkbook = rowsFromWorksheet(workbook.worksheets[0]);
+                }
+
                 applyLoadedRows({
                     rows: parsedWorkbook.rows,
                     headers: parsedWorkbook.headers,
@@ -1001,12 +1156,76 @@ export default function ImportProductPrices() {
                 });
                 shopify.toast.show(`File loaded: ${parsedWorkbook.rows.length} rows. Check the column mapping before previewing.`, { duration: 5000 });
             };
-            reader.readAsArrayBuffer(selectedFile);
+            if (selectedFile.name.toLowerCase().endsWith(".csv")) {
+                reader.readAsText(selectedFile);
+            } else {
+                reader.readAsArrayBuffer(selectedFile);
+            }
         }
     };
 
     const handleButtonClick = () => {
         if (fileInputRef.current) fileInputRef.current.click();
+    };
+
+    const rememberImportPreset = () => {
+        try {
+            window.localStorage.setItem("gd-price-updater-import-preset", JSON.stringify({
+                columnMapping,
+                priceSettings
+            }));
+            shopify.toast.show("Mapping and price settings saved for next time.", { duration: 5000 });
+        } catch (error) {
+            shopify.toast.show("Could not save settings in this browser.", { duration: 5000 });
+        }
+    };
+
+    const downloadRowsWorkbook = async (filename, sheets) => {
+        const workbook = new ExcelJS.Workbook();
+
+        Object.entries(sheets).forEach(([sheetName, rows]) => {
+            if (!rows?.length) return;
+            const worksheet = workbook.addWorksheet(sheetName.slice(0, 31));
+            const columns = tableColumns(rows[0]);
+            worksheet.addRow(columns);
+            rows.forEach((row) => worksheet.addRow(columns.map((column) => row[column] ?? "")));
+            worksheet.columns.forEach((column) => {
+                column.width = Math.min(42, Math.max(14, ...column.values.map((value) => String(value || "").length + 2)));
+            });
+        });
+
+        if (workbook.worksheets.length === 0) {
+            shopify.toast.show("There are no rows to download yet.", { duration: 5000 });
+            return;
+        }
+
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blobUrl = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(blobUrl);
+    };
+
+    const downloadResultReport = () => {
+        if (!displayResults) return;
+        downloadRowsWorkbook("price-update-report.xlsx", {
+            "Updated": displayResults.updatedRows,
+            "Warnings": displayResults.warningRows,
+            "Failed": displayResults.failedRows,
+            "Skipped": displayResults.skippedRows
+        });
+    };
+
+    const downloadRollbackFile = () => {
+        if (!displayResults?.rollbackRows?.length) {
+            shopify.toast.show("Preview changes first to create a rollback file.", { duration: 5000 });
+            return;
+        }
+        downloadRowsWorkbook("price-update-rollback.xlsx", {
+            "Rollback": displayResults.rollbackRows
+        });
     };
 
     useEffect(() => {
@@ -1139,13 +1358,13 @@ export default function ImportProductPrices() {
                         <input
                             ref={fileInputRef}
                             type="file"
-                            accept=".xlsx,.xls"
+                            accept=".xlsx,.xls,.csv"
                             onChange={handleFileChange}
                             style={{ display: 'none' }}
                         />
                         <div className="source-copy">
                             <p className="panel-title">Supplier price list, Google Sheet, CSV, or Excel URL</p>
-                            <p className="panel-copy">Use an Excel upload, a public Google Sheet link, a direct CSV link, or a direct Excel workbook URL.</p>
+                            <p className="panel-copy">Use an Excel or CSV upload, a public Google Sheet link, or an approved CSV or Excel workbook URL.</p>
                             <div className="file-meta">
                                 <span>{selectedFileName}</span>
                                 {parsedData?.length > 0 && <span>{parsedData.length} rows loaded</span>}
@@ -1157,7 +1376,7 @@ export default function ImportProductPrices() {
                                 onClick={handleButtonClick}
                                 loading={(isLoading || isUpdatingShopify) ? "true" : undefined}
                             >
-                                Choose Excel File
+                                Choose File
                             </s-button>
                             <div className="remote-source-form">
                                 <input
@@ -1266,6 +1485,17 @@ export default function ImportProductPrices() {
                                         <option value="clear">Clear compare-at price</option>
                                     </select>
                                 </label>
+                                <label>
+                                    <span>Duplicate SKUs</span>
+                                    <select
+                                        value={priceSettings.duplicateMode}
+                                        onChange={(event) => setPriceSettings((current) => ({ ...current, duplicateMode: event.target.value }))}
+                                    >
+                                        <option value="fail_duplicates">Fail duplicate SKUs</option>
+                                        <option value="use_first">Use first row</option>
+                                        <option value="use_last">Use last row</option>
+                                    </select>
+                                </label>
                             </div>
                             <label className="settings-checkbox">
                                 <input
@@ -1322,6 +1552,9 @@ export default function ImportProductPrices() {
                             >
                                 Preview Changes
                             </s-button>
+                            <s-button onClick={rememberImportPreset}>
+                                Save Mapping
+                            </s-button>
                         </div>
                     </s-section>
                 </div>
@@ -1337,6 +1570,10 @@ export default function ImportProductPrices() {
                                     <strong>{displayResults.total}</strong>
                                 </div>
                                 <div className="summary-tile">
+                                    <span>Matched SKUs</span>
+                                    <strong>{displayResults.counts?.matched || 0}</strong>
+                                </div>
+                                <div className="summary-tile">
                                     <span>{displayResults.dryRun ? "Prices ready" : "Prices updated"}</span>
                                     <strong>{displayResults.priceUpdatesCount || 0}</strong>
                                 </div>
@@ -1344,13 +1581,35 @@ export default function ImportProductPrices() {
                                     <span>{displayResults.dryRun ? "Compare-at ready" : "Compare-at updated"}</span>
                                     <strong>{displayResults.compareAtUpdatesCount || 0}</strong>
                                 </div>
-                                <div className={`summary-tile ${displayResults.errors.length > 0 ? "has-errors" : ""}`}>
-                                    <span>Errors</span>
-                                    <strong>{displayResults.errors.length}</strong>
+                                <div className={`summary-tile ${displayResults.failedRows?.length > 0 ? "has-errors" : ""}`}>
+                                    <span>Failed rows</span>
+                                    <strong>{displayResults.failedRows?.length || 0}</strong>
+                                </div>
+                                <div className={`summary-tile ${displayResults.counts?.warnings > 0 ? "has-warnings" : ""}`}>
+                                    <span>Warnings</span>
+                                    <strong>{displayResults.counts?.warnings || 0}</strong>
+                                </div>
+                                <div className="summary-tile">
+                                    <span>Skipped</span>
+                                    <strong>{displayResults.skippedRows?.length || 0}</strong>
+                                </div>
+                                <div className="summary-tile">
+                                    <span>Missing in Shopify</span>
+                                    <strong>{displayResults.counts?.missingShopifySku || 0}</strong>
+                                </div>
+                                <div className="summary-tile">
+                                    <span>Duplicate SKUs</span>
+                                    <strong>{displayResults.counts?.duplicateSku || 0}</strong>
                                 </div>
                             </div>
                             {displayResults.dryRun && displayResults.updatedRows?.length > 0 && (
                                 <div className="button-row">
+                                    <s-button onClick={downloadRollbackFile}>
+                                        Download Backup / Rollback
+                                    </s-button>
+                                    <s-button onClick={downloadResultReport}>
+                                        Download Preview Report
+                                    </s-button>
                                     <s-button
                                         variant="primary"
                                         onClick={() => submitImport(false)}
@@ -1360,15 +1619,50 @@ export default function ImportProductPrices() {
                                     </s-button>
                                 </div>
                             )}
+                            {!displayResults.dryRun && (
+                                <div className="button-row">
+                                    <s-button onClick={downloadResultReport}>
+                                        Download Update Report
+                                    </s-button>
+                                    <s-button onClick={downloadRollbackFile}>
+                                        Download Rollback File
+                                    </s-button>
+                                </div>
+                            )}
                         </s-section>
                     </div>
+
+                    {displayResults.warningRows?.length > 0 && (
+                        <div className="section-gap">
+                            <s-section heading="Warnings to Review">
+                                <s-table>
+                                    <s-table-header-row>
+                                        {tableColumns(displayResults.warningRows[0] || {}).map((key) => (
+                                            <s-table-header key={key}>{key}</s-table-header>
+                                        ))}
+                                    </s-table-header-row>
+                                    <s-table-body>
+                                        {displayResults.warningRows.slice(0, 10).map((row, index) => (
+                                            <s-table-row key={index}>
+                                                {tableColumns(displayResults.warningRows[0] || {}).map((key, cellIndex) => (
+                                                    <s-table-cell key={cellIndex}>
+                                                        {row[key]?.toString() || '-'}
+                                                    </s-table-cell>
+                                                ))}
+                                            </s-table-row>
+                                        ))}
+                                    </s-table-body>
+                                </s-table>
+                            </s-section>
+                        </div>
+                    )}
 
                     {displayResults.updatedRows?.length > 0 && (
                         <div className="section-gap">
                             <s-section heading={displayResults.dryRun ? "Rows Ready to Update" : "Updated Rows"}>
                                 <s-table>
                                     <s-table-header-row>
-                                        {Object.keys(displayResults.updatedRows[0] || {}).map((key) => (
+                                        {tableColumns(displayResults.updatedRows[0] || {}).map((key) => (
                                             <s-table-header key={key}>{key}</s-table-header>
                                         ))}
                                     </s-table-header-row>
@@ -1377,7 +1671,7 @@ export default function ImportProductPrices() {
                                             .slice((updatedPage - 1) * updatedRowsPerPage, updatedPage * updatedRowsPerPage)
                                             .map((row, index) => (
                                                 <s-table-row key={index}>
-                                                    {Object.keys(displayResults.updatedRows[0] || {}).map((key, cellIndex) => (
+                                                    {tableColumns(displayResults.updatedRows[0] || {}).map((key, cellIndex) => (
                                                         <s-table-cell key={cellIndex}>
                                                             {row[key]?.toString() || '-'}
                                                         </s-table-cell>
@@ -1405,7 +1699,7 @@ export default function ImportProductPrices() {
                             <s-section heading="Failed Rows">
                                 <s-table>
                                     <s-table-header-row>
-                                        {Object.keys(displayResults.failedRows[0] || {}).map((key) => (
+                                        {tableColumns(displayResults.failedRows[0] || {}).map((key) => (
                                             <s-table-header key={key}>{key}</s-table-header>
                                         ))}
                                     </s-table-header-row>
@@ -1414,7 +1708,7 @@ export default function ImportProductPrices() {
                                             .slice((failedPage - 1) * failedRowsPerPage, failedPage * failedRowsPerPage)
                                             .map((row, index) => (
                                                 <s-table-row key={index}>
-                                                    {Object.keys(displayResults.failedRows[0] || {}).map((key, cellIndex) => (
+                                                    {tableColumns(displayResults.failedRows[0] || {}).map((key, cellIndex) => (
                                                         <s-table-cell key={cellIndex}>
                                                             {row[key]?.toString() || '-'}
                                                         </s-table-cell>
@@ -1442,7 +1736,7 @@ export default function ImportProductPrices() {
                             <s-section heading="Skipped Rows - Prices Already Match">
                                 <s-table>
                                     <s-table-header-row>
-                                        {Object.keys(displayResults.skippedRows[0] || {}).map((key) => (
+                                        {tableColumns(displayResults.skippedRows[0] || {}).map((key) => (
                                             <s-table-header key={key}>{key}</s-table-header>
                                         ))}
                                     </s-table-header-row>
@@ -1451,7 +1745,7 @@ export default function ImportProductPrices() {
                                             .slice((skippedPage - 1) * skippedRowsPerPage, skippedPage * skippedRowsPerPage)
                                             .map((row, index) => (
                                                 <s-table-row key={index}>
-                                                    {Object.keys(displayResults.skippedRows[0] || {}).map((key, cellIndex) => (
+                                                    {tableColumns(displayResults.skippedRows[0] || {}).map((key, cellIndex) => (
                                                         <s-table-cell key={cellIndex}>
                                                             {row[key]?.toString() || '-'}
                                                         </s-table-cell>
